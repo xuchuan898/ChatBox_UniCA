@@ -1,0 +1,27 @@
+# English Questions
+1. Who is the lecturer for the "AI Game Programming" course in Semester 1?
+2. What are the two options available for the "UE Projet" in Semester 2?
+3. How many ECTS credits is the "Neural Language Processing" course worth?
+4. Which Semester 1 course includes topics such as Kripke structures and CTL/LTL temporal logics?
+5. What is the email address of the person responsible for the M1 work-study program (*alternance*)?
+6. In Semester 1, what is the maximum number of elective courses (UE au choix) a student can take, and what restriction applies to DS4H minors?
+7. Describe the key difference in the weekly schedule between the initial training track and the work-study track.
+8. Which Semester 2 course covers argumentation theory, belief revision, and fuzzy logic?
+9. Which two courses are taught by M. Regin across the two semesters?
+10. What is the duration of the compulsory internship in this master's program?
+11. Which Semester 1 elective course deals with parallelizing machine learning tasks on GPU clusters?
+12. According to the detailed pedagogical objectives, what three types of professionals does this track aim to train?
+
+# Questions en Francais
+1. Qui est l'enseignant du cours "AI Game Programming" au premier semestre ?
+2. Quelles sont les deux options proposees pour l'UE Projet au deuxieme semestre ?
+3. Combien de credits ECTS vaut le cours "Neural Language Processing" ?
+4. Quel cours du premier semestre aborde des sujets comme les structures de Kripke et les logiques temporelles CTL/LTL ?
+5. Quelle est l'adresse e-mail du responsable de l'alternance en M1 ?
+6. Au premier semestre, quel est le nombre maximum d'UE au choix qu'un etudiant peut suivre, et quelle restriction s'applique aux mineures DS4H ?
+7. Decrivez la principale difference d'emploi du temps hebdomadaire entre la formation initiale et la formation en alternance.
+8. Quel cours du deuxieme semestre traite de la theorie de l'argumentation, de la revision des croyances et de la logique floue ?
+9. Quels sont les deux cours enseignes par M. Regin au cours des deux semestres ?
+10. Quelle est la duree du stage obligatoire dans ce master ?
+11. Quelle UE au choix du premier semestre concerne la parallelisation de taches d'apprentissage automatique sur des clusters GPU ?
+12. D'apres les objectifs pedagogiques detailles, quels trois types de professionnels cette formation vise-t-elle a former ?

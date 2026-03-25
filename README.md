@@ -25,23 +25,38 @@ This project implements a simple chatbot for answering questions about the Maste
 
 ## Usage
 
-Place `master.md` in the same directory as `chat_box.py`.
-
-Run the main script:
+Run with a single local document (fastest):
 ```bash
-python chat_box.py
+python chat_box.py --doc-file ./docs/chroma/master.txt
 ```
-The chatbot will start an interactive loop. Type questions like "Quels sont les cours en semestre 1?" and press Enter. Type 'exit' to quit.
 
-For command-line questions:
+Optional URL sources (one URL per line in `./docs/chroma/source_urls.txt`):
 ```bash
-python chat_box.py -q "Your question here"
+python chat_box.py --doc-file ./docs/chroma/master.txt --url-file ./docs/chroma/source_urls.txt
+```
+
+Single question mode:
+```bash
+python chat_box.py --doc-file ./docs/chroma/master.txt -q "Your question here"
+```
+
+Batch question mode (`./questions/*.txt`):
+```bash
+python chat_box.py --doc-file ./docs/chroma/master.txt --question-file ./questions/questions_batch_example.txt --answer-file ./docs/chroma/answers.txt
+```
+
+Debug mode (timing, chunks, retrieval details):
+```bash
+python chat_box.py --doc-file ./docs/chroma/master.txt --debug
 ```
 
 ## Project Structure
 
 - `chat_box.py`: Main script with data preparation, chatbot setup, and interactive loop.
-- `master.md`: Markdown document containing information about the Master's program.
+- `docs/chroma/master.md`: Original markdown knowledge document.
+- `docs/chroma/master.txt`: Plain-text version used for format comparison experiments.
+- `docs/chroma/source_urls.txt`: Optional URL list for web/calendar ingestion.
+- `questions/questions_batch_example.txt`: Example batch question file.
 
 ## How It Works
 
