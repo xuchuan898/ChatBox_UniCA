@@ -4,9 +4,12 @@ import os
 import re
 import time
 import zipfile
+import numpy as np
 from xml.etree import ElementTree as ET
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
+from collections import defaultdict
+from typing import List, Tuple, Optional
 
 from langchain_classic.chains import create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
@@ -17,8 +20,12 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import ChatOllama
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from sentence_transformers import CrossEncoder
 
+import bm25s
+from bm25s.tokenization import Tokenizer
 
 URL_SOURCE_FILE = "./docs/chroma/source_urls.txt"
 DEFAULT_DOC_FILE = "./docs/chroma/master.md"
@@ -131,6 +138,94 @@ def load_source_documents(doc_file: str, url_file: str | None = None) -> list[Do
     return docs
 
 
+def _is_table(content: str) -> bool:
+    """Heuristic to detect markdown tables."""
+    lines = content.split('\n')
+    if len(lines) < 2:
+        return False
+    pipe_count = sum(1 for line in lines if '|' in line)
+    return pipe_count > 2
+
+
+def _adaptive_split_documents(docs: List[Document], debug: bool = False) -> List[Document]:
+    """
+    Adaptive chunking based on document type and structure.
+    - Markdown/web: header-based splitting (preserves H1-H4)
+    - Plain text: paragraph-based splitting
+    - Tables/ lists: kept intact
+    - Recursive split if chunk too long (>1500 chars)
+    """
+    final_chunks = []
+    headers_to_split_on = [
+        ("#", "H1"),
+        ("##", "H2"),
+        ("###", "H3"),
+        ("####", "H4"),
+    ]
+    markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
+    recursive_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        separators=["\n\n", "\n", ".", " ", ""],
+    )
+
+    for doc in docs:
+        source_type = doc.metadata.get("source_type", "unknown")
+        content = doc.page_content
+
+        # Special case: discord links or error docs – keep as single chunk
+        if source_type in {"discord_link", "load_error"}:
+            final_chunks.append(doc)
+            continue
+
+        # Step 1: choose primary splitter based on document type
+        if source_type in {"web", "markdown"} or content.strip().startswith("#"):
+            # Markdown-like: use header splitter
+            try:
+                splits = markdown_splitter.split_text(content)
+            except Exception:
+                splits = [Document(page_content=content, metadata=doc.metadata)]
+        else:
+            # Plain text: split by paragraphs (double newline)
+            paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+            if not paragraphs:
+                paragraphs = [content]
+            splits = [Document(page_content=p, metadata=doc.metadata.copy()) for p in paragraphs]
+
+        # Step 2: process each split, optionally enrich with header context
+        for split_doc in splits:
+            # Add header context if available (for header-based splits)
+            if hasattr(split_doc, 'metadata'):
+                header_ctx = " ".join([
+                    split_doc.metadata.get("H1", ""),
+                    split_doc.metadata.get("H2", ""),
+                    split_doc.metadata.get("H3", ""),
+                    split_doc.metadata.get("H4", ""),
+                ])
+                if header_ctx:
+                    split_doc.page_content = header_ctx + "\n" + split_doc.page_content
+
+            # Check if content is a table or list – keep intact
+            if _is_table(split_doc.page_content) or "|" in split_doc.page_content:
+                final_chunks.append(split_doc)
+                continue
+
+            # Step 3: length control – recursive split if too long
+            if len(split_doc.page_content) > 1500:
+                sub_chunks = recursive_splitter.split_documents([split_doc])
+                final_chunks.extend(sub_chunks)
+            else:
+                final_chunks.append(split_doc)
+
+    if debug:
+        print(f"[DEBUG] Adaptive split: total chunks = {len(final_chunks)}")
+        if final_chunks:
+            lengths = [len(c.page_content) for c in final_chunks]
+            print(f"[DEBUG] Chunk length stats: min={min(lengths)} max={max(lengths)} avg={sum(lengths)/len(lengths):.0f}")
+
+    return final_chunks
+
+
 def prepare_data(doc_file: str, url_file: str | None = None, debug: bool = False):
     start_total = time.perf_counter()
     embeddings = HuggingFaceEmbeddings(model_name="intfloat/multilingual-e5-base")
@@ -138,38 +233,20 @@ def prepare_data(doc_file: str, url_file: str | None = None, debug: bool = False
     docs = load_source_documents(doc_file=doc_file, url_file=url_file)
     load_time = time.perf_counter() - start_load
 
-    headers_to_split_on = [
-        ("#", "H1"),
-        ("##", "H2"),
-        ("###", "H3"),
-    ]
-    markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
+    # Adaptive document chunking
+    texts = _adaptive_split_documents(docs, debug=debug)
 
-    texts = []
-    for doc in docs:
-        splits = markdown_splitter.split_text(doc.page_content)
-        for split_doc in splits:
-            header_context = " ".join(
-                [
-                    split_doc.metadata.get("H1", ""),
-                    split_doc.metadata.get("H2", ""),
-                    split_doc.metadata.get("H3", ""),
-                ]
-            )
-            metadata = {**doc.metadata, **split_doc.metadata}
-            texts.append(
-                Document(
-                    page_content=header_context + "\n" + split_doc.page_content,
-                    metadata=metadata,
-                )
-            )
-
-    token_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=120)
-    texts = token_splitter.split_documents(texts)
-
+    # Build vector database
     start_embedding = time.perf_counter()
     vectordb = Chroma.from_documents(texts, embedding=embeddings)
     embedding_time = time.perf_counter() - start_embedding
+
+    # Build BM25 index for hybrid search
+    corpus = [doc.page_content for doc in texts]
+    tokenizer = Tokenizer()
+    corpus_tokens = tokenizer.tokenize(corpus)
+    bm25_index = bm25s.BM25()
+    bm25_index.index(corpus_tokens)
 
     if debug:
         print(f"[DEBUG] Loaded documents: {len(docs)} in {load_time:.2f}s")
@@ -177,7 +254,7 @@ def prepare_data(doc_file: str, url_file: str | None = None, debug: bool = False
         print(f"[DEBUG] Embedding + vector DB build time: {embedding_time:.2f}s")
         print(f"[DEBUG] prepare_data total time: {time.perf_counter() - start_total:.2f}s")
 
-    return vectordb
+    return vectordb, bm25_index, tokenizer, corpus
 
 
 def parse_args() -> argparse.Namespace:
@@ -293,47 +370,46 @@ def _print_retrieval_markdown(question: str, base_scored: list[tuple[Document, f
     print("[DEBUG][RETRIEVE_MD_END]")
 
 
-def chatbox(vectordb, debug: bool = False, return_prompt: bool = False):
+def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return_prompt: bool = False):
+    # Deterministic LLM settings
     llm = ChatOllama(
-        
         model="gemma3:1b",
-            
+        temperature=0.0,
+        seed=42,
         validate_model_on_init=True,
-            
-        temperature=0.8,
-            
         num_predict=256,
-        
-    # other params ...
     )
 
+    # Optimized prompt: use only context, no hallucinations
     prompt = ChatPromptTemplate.from_template("""
-        Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer. Use the context to answer concisely. Keep the answer as concise as possible. Always say "Merci pour votre question!" at the end of the answer. Please answer the question in the langugae used by the question
+        Use ONLY the following context to answer the question.
+        If the answer is not found in the context, say "I don't know."
+        Do not add any information not present in the context.
+        Keep the answer concise.
+        Always say "Merci pour votre question!" at the end of the answer.
+        Answer in the same language as the question.
+
+        Context:
         {context}
 
         Question: {input}
-        Answer:""")
+        Answer:
+    """)
 
-    # Run chain
-
-    # Base retriever: MMR (kept exactly as you had it)
+    # Base retriever: MMR with larger candidate pool
     base_retriever = vectordb.as_retriever(
         search_type="mmr",
-        search_kwargs={"k": 20, "fetch_k": 30, "lambda_mult": 0.7}
+        search_kwargs={"k": 30, "fetch_k": 50, "lambda_mult": 0.7}
     )
-    # Load the reranker model (supports English and French)
+
+    # Load reranker model (supports English and French)
     reranker = CrossEncoder('nvidia/llama-nemotron-rerank-1b-v2', trust_remote_code=True)
 
-    # Define a manual reranking function
-    def rerank_documents(query, documents, top_n=5, return_scores=False):
-        """
-        Reranks a list of documents using a cross-encoder model.
-        Returns the top_n documents sorted by relevance.
-        """
+    def rerank_documents(query, documents, top_n=8, return_scores=False):
         if not documents:
-            return []
+            return [] if not return_scores else []
         pairs = [(query, doc.page_content) for doc in documents]
-        scores = reranker.predict(pairs)  # list of scores (higher = more relevant)
+        scores = reranker.predict(pairs)
         scored = [(doc, float(score)) for doc, score in zip(documents, scores)]
         scored.sort(key=lambda x: x[1], reverse=True)
         top_scored = scored[:top_n]
@@ -341,46 +417,60 @@ def chatbox(vectordb, debug: bool = False, return_prompt: bool = False):
             return top_scored
         return [doc for doc, _ in top_scored]
 
-    # Custom retriever that applies reranking after base retrieval
-    def custom_retriever(question):
-        try:
-            base_scored = vectordb.similarity_search_with_relevance_scores(question, k=20)
-        except Exception:
-            # Fallback when relevance scores are unavailable
-            fallback_docs = base_retriever.invoke(question)
-            base_scored = [(doc, float("nan")) for doc in fallback_docs]
+    def rrf_fusion(vector_docs, bm25_docs, k=60):
+        scores = defaultdict(float)
+        for rank, doc in enumerate(vector_docs, 1):
+            scores[doc.page_content] += 1 / (k + rank)
+        for rank, doc in enumerate(bm25_docs, 1):
+            scores[doc.page_content] += 1 / (k + rank)
+        sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return [Document(page_content=text) for text, _ in sorted_items]
 
-        docs = [doc for doc, _ in base_scored]
-        reranked_scored = rerank_documents(question, docs, top_n=5, return_scores=True)
+    def custom_retriever(question):
+        # 1. Vector retrieval (MMR)
+        vec_docs = base_retriever.invoke(question)
+
+        # 2. BM25 retrieval - dynamically adjust k
+        query_tokens = tokenizer.tokenize(question)
+        corpus_size = len(corpus)
+        bm25_k = min(30, corpus_size)  # Don't request more than available
+        bm25_results, _ = bm25_index.retrieve(query_tokens, k=bm25_k)
+
+        # Handle both 1D and 2D result shapes
+        if bm25_results.ndim == 2:
+            indices = bm25_results[0]
+        else:
+            indices = bm25_results
+
+        # Convert to list of ints
+        if hasattr(indices, 'tolist'):
+            indices = indices.tolist()
+        else:
+            indices = list(indices)
+
+        # Build Document list from corpus
+        bm25_docs = [Document(page_content=corpus[idx]) for idx in indices]
+
+        # 3. RRF fusion
+        merged = rrf_fusion(vec_docs, bm25_docs, k=60)
+
+        # 4. Take top 50 candidates (or fewer)
+        candidates = merged[:50] if len(merged) > 50 else merged
+
+        # 5. Rerank
+        reranked_scored = rerank_documents(question, candidates, top_n=8, return_scores=True)
 
         if debug:
-            base_scores = [score for _, score in base_scored if score == score]
-            rerank_scores = [score for _, score in reranked_scored if score == score]
-            print(
-                f"[DEBUG][RETRIEVE] q={question!r} base_count={len(base_scored)} rerank_count={len(reranked_scored)}"
-            )
-            if base_scores:
-                print(
-                    "[DEBUG][RETRIEVE][BASE_STATS] "
-                    f"min={min(base_scores):.4f} max={max(base_scores):.4f} avg={sum(base_scores)/len(base_scores):.4f}"
-                )
-            if rerank_scores:
-                print(
-                    "[DEBUG][RETRIEVE][RERANK_STATS] "
-                    f"min={min(rerank_scores):.4f} max={max(rerank_scores):.4f} avg={sum(rerank_scores)/len(rerank_scores):.4f}"
-                )
-            for idx, (doc, score) in enumerate(base_scored[:3], 1):
-                print(f"[DEBUG][RETRIEVE][BASE_TOP] rank={idx} score={score:.4f} source={_short_source(doc)}")
+            print(f"[DEBUG][RETRIEVE] q={question!r} vec={len(vec_docs)} bm25={len(bm25_docs)} merged={len(merged)} final={len(reranked_scored)}")
             for idx, (doc, score) in enumerate(reranked_scored[:3], 1):
-                print(f"[DEBUG][RETRIEVE][RERANK_TOP] rank={idx} score={score:.4f} source={_short_source(doc)}")
-            _print_retrieval_markdown(question, base_scored, reranked_scored)
+                source = _short_source(doc)
+                print(f"[DEBUG][TOP{idx}] score={score:.4f} source={source}")
+
+            # For backward compatibility, produce a dummy base_scored list for markdown print
+            dummy_base = [(doc, 0.0) for doc in candidates[:10]]
+            _print_retrieval_markdown(question, dummy_base, reranked_scored)
 
         return [doc for doc, _ in reranked_scored]
-
-    # Wrap the custom retriever to match LangChain's retriever interface
-    from langchain_core.retrievers import BaseRetriever
-    from langchain_core.callbacks import CallbackManagerForRetrieverRun
-    from typing import List
 
     class CustomRetriever(BaseRetriever):
         def _get_relevant_documents(
@@ -417,8 +507,17 @@ def main() -> None:
     if args.question_file and not os.path.exists(args.question_file):
         raise FileNotFoundError(f"Question file not found: {args.question_file}")
 
+    vectordb, bm25_index, tokenizer, corpus = prepare_data(
+        doc_file=args.doc_file,
+        url_file=args.url_file,
+        debug=args.debug,
+    )
+
     qa_chain, retriever = chatbox(
-        prepare_data(doc_file=args.doc_file, url_file=args.url_file, debug=args.debug),
+        vectordb=vectordb,
+        bm25_index=bm25_index,
+        tokenizer=tokenizer,
+        corpus=corpus,
         debug=args.debug,
     )
 
@@ -474,7 +573,6 @@ def main() -> None:
         print_result = result["answer"]
         print(f"--Question received: {user_input}")
         print(f"**Bot Answer**: {print_result} \\")
-    
 
 
 if __name__ == "__main__":

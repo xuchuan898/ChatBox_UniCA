@@ -16,7 +16,7 @@ This project implements a simple chatbot for answering questions about the Maste
 1. Clone or download the project.
 2. Install dependencies:
    ```bash
-   pip install langchain langchain-community langchain-huggingface langchain-text-splitters langchain-ollama langchain-core chromadb sentence-transformers
+   pip install langchain langchain-community langchain-huggingface langchain-text-splitters langchain-ollama langchain-core chromadb sentence-transformers bm25s
    ```
 3. Ensure Ollama is installed and running with the `gemma3:1b` model:
    ```bash
