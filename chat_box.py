@@ -9,7 +9,7 @@ from xml.etree import ElementTree as ET
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 from collections import defaultdict
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 
 from langchain_classic.chains import create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
@@ -26,6 +26,18 @@ from sentence_transformers import CrossEncoder
 
 import bm25s
 from bm25s.tokenization import Tokenizer
+
+# For PDF to Markdown conversion
+try:
+    import pymupdf4llm
+except ImportError:
+    pymupdf4llm = None
+
+# For DOCX to Markdown conversion
+try:
+    import mammoth
+except ImportError:
+    mammoth = None
 
 URL_SOURCE_FILE = "./docs/chroma/source_urls.txt"
 DEFAULT_DOC_FILE = "./docs/chroma/master.md"
@@ -110,22 +122,29 @@ def _load_web_docs(url: str) -> list[Document]:
 
 def _load_local_doc(doc_file: str) -> list[Document]:
     extension = os.path.splitext(doc_file)[1].lower()
-    if extension in {".md", ".txt"}:
+    if extension == ".md":
+        return TextLoader(doc_file, encoding="utf-8").load()
+    if extension == ".txt":
         return TextLoader(doc_file, encoding="utf-8").load()
     if extension == ".pdf":
-        return PyPDFLoader(doc_file).load()
+        if pymupdf4llm is None:
+            raise ImportError("pymupdf4llm is required for PDF conversion. Install with: pip install pymupdf4llm")
+        # Convert PDF to Markdown
+        md_text = pymupdf4llm.to_markdown(doc_file)
+        return [Document(
+            page_content=md_text,
+            metadata={"source": doc_file, "source_type": "pdf_md"}
+        )]
     if extension == ".docx":
-        with zipfile.ZipFile(doc_file) as zf:
-            xml_bytes = zf.read("word/document.xml")
-        root = ET.fromstring(xml_bytes)
-        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-        paragraphs = []
-        for para in root.findall(".//w:p", ns):
-            parts = [node.text for node in para.findall(".//w:t", ns) if node.text]
-            if parts:
-                paragraphs.append("".join(parts))
-        page_content = "\n".join(paragraphs).strip()
-        return [Document(page_content=page_content, metadata={"source": doc_file, "source_type": "docx"})]
+        if mammoth is None:
+            raise ImportError("mammoth is required for DOCX conversion. Install with: pip install mammoth")
+        with open(doc_file, "rb") as f:
+            result = mammoth.convert_to_markdown(f)
+            md_text = result.value
+        return [Document(
+            page_content=md_text,
+            metadata={"source": doc_file, "source_type": "docx_md"}
+        )]
     raise ValueError(f"Unsupported doc extension: {extension}. Supported: .md, .txt, .pdf, .docx")
 
 
@@ -155,6 +174,79 @@ def load_source_documents(doc_file: str, url_file: str | None = None) -> list[Do
     return docs
 
 
+# ============================================================================
+# Section 1: Generic TXT parser with rule-based structure detection
+# ============================================================================
+
+class TxtStructureParser:
+    """
+    Parses plain text files (TXT) into semantic chunks with type labels.
+    Uses configurable regex rules to detect titles, lists, staff information, etc.
+    """
+    def __init__(self, custom_rules: Optional[Dict[str, str]] = None):
+        # Default detection rules (regex pattern -> chunk_type)
+        self.rules = {
+            # Titles: all caps, numbered sections, common keywords
+            r"^[A-Z][A-Z\s]{3,}$": "title",
+            r"^[0-9]+\.\s+": "title",
+            r"^(Introduction|Conclusion|Objectifs|Prérequis|Pédagogie|Débouchées|Rythme|Responsable|Semestre|Cours Programme)": "title",
+            # Lists: bullet points or numbered items
+            r"^[\-\*•]\s+": "list",
+            r"^\d+\.\s+": "list",
+            # Staff / responsible lines
+            r"responsable|master|assistant|coordinateur": "staff",
+            # Course detection (adjust as needed)
+            r"ECTS|Lecteur|UE\s+": "course",
+        }
+        if custom_rules:
+            self.rules.update(custom_rules)
+
+    def parse(self, text: str) -> List[Document]:
+        """Split text into paragraphs and assign chunk_type based on rules."""
+        chunks = []
+        # Split by double newline (standard paragraph separator)
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        for para in paragraphs:
+            chunk_type = self._detect_type(para)
+            chunks.append(Document(
+                page_content=para,
+                metadata={"chunk_type": chunk_type}
+            ))
+        # Merge consecutive list chunks into one block
+        merged = self._merge_lists(chunks)
+        return merged
+
+    def _detect_type(self, text: str) -> str:
+        for pattern, ctype in self.rules.items():
+            if re.search(pattern, text, re.IGNORECASE):
+                return ctype
+        return "general"
+
+    def _merge_lists(self, chunks: List[Document]) -> List[Document]:
+        merged = []
+        i = 0
+        while i < len(chunks):
+            if chunks[i].metadata.get("chunk_type") == "list":
+                list_text = chunks[i].page_content
+                j = i + 1
+                while j < len(chunks) and chunks[j].metadata.get("chunk_type") == "list":
+                    list_text += "\n" + chunks[j].page_content
+                    j += 1
+                merged.append(Document(
+                    page_content=list_text,
+                    metadata={"chunk_type": "list"}
+                ))
+                i = j
+            else:
+                merged.append(chunks[i])
+                i += 1
+        return merged
+
+
+# ============================================================================
+# Section 2: Enhanced adaptive splitter for all document types
+# ============================================================================
+
 def _is_table(content: str) -> bool:
     """Heuristic to detect markdown tables."""
     lines = content.split('\n')
@@ -166,9 +258,10 @@ def _is_table(content: str) -> bool:
 
 def _adaptive_split_documents(docs: List[Document], debug: bool = False) -> List[Document]:
     """
-    Adaptive chunking based on document type and structure.
+    Advanced adaptive chunking that handles:
     - Markdown/web: header-based splitting (preserves H1-H4)
-    - Plain text: paragraph-based splitting
+    - PDF/Word converted to Markdown: same as Markdown
+    - TXT: use TxtStructureParser for semantic chunking + type labeling
     - Tables/ lists: kept intact
     - Recursive split if chunk too long (>1500 chars)
     """
@@ -185,6 +278,8 @@ def _adaptive_split_documents(docs: List[Document], debug: bool = False) -> List
         chunk_overlap=200,
         separators=["\n\n", "\n", ".", " ", ""],
     )
+    # TXT parser instance (custom rules can be added later)
+    txt_parser = TxtStructureParser()
 
     for doc in docs:
         source_type = doc.metadata.get("source_type", "unknown")
@@ -195,24 +290,30 @@ def _adaptive_split_documents(docs: List[Document], debug: bool = False) -> List
             final_chunks.append(doc)
             continue
 
-        # Step 1: choose primary splitter based on document type
-        if source_type in {"web", "markdown"} or content.strip().startswith("#"):
-            # Markdown-like: use header splitter
+        # ------------------------------------------------------------
+        # Case 1: TXT files – use intelligent structure parser
+        # ------------------------------------------------------------
+        if source_type == "txt":
+            txt_chunks = txt_parser.parse(content)
+            # Inherit original metadata (source, source_type, etc.)
+            for chunk in txt_chunks:
+                chunk.metadata.update(doc.metadata)
+                # Ensure chunk_type is set; if not, default to general
+                chunk.metadata.setdefault("chunk_type", "general")
+            final_chunks.extend(txt_chunks)
+            continue
+
+        # ------------------------------------------------------------
+        # Case 2: Markdown / converted PDF/DOCX (source_type contains "md")
+        # ------------------------------------------------------------
+        if source_type in {"web", "markdown", "pdf_md", "docx_md"} or content.strip().startswith("#"):
             try:
                 splits = markdown_splitter.split_text(content)
             except Exception:
                 splits = [Document(page_content=content, metadata=doc.metadata)]
-        else:
-            # Plain text: split by paragraphs (double newline)
-            paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
-            if not paragraphs:
-                paragraphs = [content]
-            splits = [Document(page_content=p, metadata=doc.metadata.copy()) for p in paragraphs]
 
-        # Step 2: process each split, optionally enrich with header context
-        for split_doc in splits:
-            # Add header context if available (for header-based splits)
-            if hasattr(split_doc, 'metadata'):
+            for split_doc in splits:
+                # Add header context if available
                 header_ctx = " ".join([
                     split_doc.metadata.get("H1", ""),
                     split_doc.metadata.get("H2", ""),
@@ -222,25 +323,82 @@ def _adaptive_split_documents(docs: List[Document], debug: bool = False) -> List
                 if header_ctx:
                     split_doc.page_content = header_ctx + "\n" + split_doc.page_content
 
-            # Check if content is a table or list – keep intact
-            if _is_table(split_doc.page_content) or "|" in split_doc.page_content:
-                final_chunks.append(split_doc)
+                # Try to detect chunk_type (simple heuristics)
+                chunk_type = _guess_chunk_type(split_doc.page_content)
+                split_doc.metadata["chunk_type"] = chunk_type
+
+                # Table protection
+                if _is_table(split_doc.page_content) or "|" in split_doc.page_content:
+                    final_chunks.append(split_doc)
+                    continue
+
+                # Length control
+                if len(split_doc.page_content) > 1500:
+                    sub_chunks = recursive_splitter.split_documents([split_doc])
+                    for sub in sub_chunks:
+                        sub.metadata["chunk_type"] = chunk_type
+                    final_chunks.extend(sub_chunks)
+                else:
+                    final_chunks.append(split_doc)
+            continue
+
+        # ------------------------------------------------------------
+        # Case 3: Plain text (e.g., from PDF/Word without conversion) – fallback to paragraph splitting
+        # ------------------------------------------------------------
+        # Split by paragraphs (double newline)
+        paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+        if not paragraphs:
+            paragraphs = [content]
+
+        for para in paragraphs:
+            # Create a temporary Document for this paragraph
+            para_doc = Document(page_content=para, metadata=doc.metadata.copy())
+            # Guess chunk type
+            chunk_type = _guess_chunk_type(para)
+            para_doc.metadata["chunk_type"] = chunk_type
+
+            # Table protection
+            if _is_table(para) or "|" in para:
+                final_chunks.append(para_doc)
                 continue
 
-            # Step 3: length control – recursive split if too long
-            if len(split_doc.page_content) > 1500:
-                sub_chunks = recursive_splitter.split_documents([split_doc])
+            # Length control
+            if len(para) > 1500:
+                sub_chunks = recursive_splitter.split_documents([para_doc])
+                for sub in sub_chunks:
+                    sub.metadata["chunk_type"] = chunk_type
                 final_chunks.extend(sub_chunks)
             else:
-                final_chunks.append(split_doc)
+                final_chunks.append(para_doc)
 
     if debug:
         print(f"[DEBUG] Adaptive split: total chunks = {len(final_chunks)}")
         if final_chunks:
             lengths = [len(c.page_content) for c in final_chunks]
             print(f"[DEBUG] Chunk length stats: min={min(lengths)} max={max(lengths)} avg={sum(lengths)/len(lengths):.0f}")
+            # Count chunk types
+            types = defaultdict(int)
+            for c in final_chunks:
+                typ = c.metadata.get("chunk_type", "unknown")
+                types[typ] += 1
+            print(f"[DEBUG] Chunk type distribution: {dict(types)}")
 
     return final_chunks
+
+
+def _guess_chunk_type(text: str) -> str:
+    """
+    Simple heuristic to guess the chunk type for non-TXT documents.
+    Used as fallback.
+    """
+    text_lower = text.lower()
+    if re.search(r"responsable|master|assistant|coordinateur", text_lower):
+        return "staff"
+    if re.search(r"ects|lecteur|ue\s+", text_lower):
+        return "course"
+    if re.search(r"^[\-\*•]\s+", text_lower) or re.search(r"^\d+\.\s+", text_lower):
+        return "list"
+    return "general"
 
 
 def prepare_data(doc_file: str, url_file: str | None = None, debug: bool = False):
@@ -250,7 +408,7 @@ def prepare_data(doc_file: str, url_file: str | None = None, debug: bool = False
     docs = load_source_documents(doc_file=doc_file, url_file=url_file)
     load_time = time.perf_counter() - start_load
 
-    # Adaptive document chunking
+    # Adaptive document chunking (now with TXT intelligence and converted PDF/DOCX)
     texts = _adaptive_split_documents(docs, debug=debug)
 
     # Build vector database
@@ -366,23 +524,25 @@ def _print_retrieval_markdown(question: str, base_scored: list[tuple[Document, f
     print("")
 
     print("#### Base Retrieval (Top 5)")
-    print("| Rank | Score | Source | Type | Preview |")
-    print("| ---: | ---: | --- | --- | --- |")
+    print("| Rank | Score | Source | Type | Chunk Type | Preview |")
+    print("| ---: | ---: | --- | --- | --- | --- |")
     for idx, (doc, score) in enumerate(base_scored[:5], 1):
         source = _md_escape(_short_source(doc))
         source_type = _md_escape(str(doc.metadata.get("source_type", "unknown")))
+        chunk_type = _md_escape(str(doc.metadata.get("chunk_type", "unknown")))
         preview = _md_escape(_compact_preview(doc.page_content))
-        print(f"| {idx} | {score:.4f} | {source} | {source_type} | {preview} |")
+        print(f"| {idx} | {score:.4f} | {source} | {source_type} | {chunk_type} | {preview} |")
 
     print("")
     print("#### Rerank Result (Top 5)")
-    print("| Rank | Rerank Score | Source | Type | Preview |")
-    print("| ---: | ---: | --- | --- | --- |")
+    print("| Rank | Rerank Score | Source | Type | Chunk Type | Preview |")
+    print("| ---: | ---: | --- | --- | --- | --- |")
     for idx, (doc, score) in enumerate(reranked_scored[:5], 1):
         source = _md_escape(_short_source(doc))
         source_type = _md_escape(str(doc.metadata.get("source_type", "unknown")))
+        chunk_type = _md_escape(str(doc.metadata.get("chunk_type", "unknown")))
         preview = _md_escape(_compact_preview(doc.page_content))
-        print(f"| {idx} | {score:.4f} | {source} | {source_type} | {preview} |")
+        print(f"| {idx} | {score:.4f} | {source} | {source_type} | {chunk_type} | {preview} |")
 
     print("[DEBUG][RETRIEVE_MD_END]")
 
@@ -414,10 +574,15 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
         Answer:
     """)
 
-    # Base retriever: MMR with larger candidate pool
+    # Base retriever: MMR with larger candidate pool, excluding staff chunks
     base_retriever = vectordb.as_retriever(
         search_type="mmr",
-        search_kwargs={"k": 30, "fetch_k": 50, "lambda_mult": 0.7}
+        search_kwargs={
+            "k": 30,
+            "fetch_k": 50,
+            "lambda_mult": 0.7,
+            "filter": {"chunk_type": {"$ne": "staff"}}   # exclude staff/responsible lists
+        }
     )
 
     # Load reranker model (supports English and French)
@@ -445,13 +610,13 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
         return [Document(page_content=text) for text, _ in sorted_items]
 
     def custom_retriever(question):
-        # 1. Vector retrieval (MMR)
+        # 1. Vector retrieval (MMR) with filter
         vec_docs = base_retriever.invoke(question)
 
         # 2. BM25 retrieval - dynamically adjust k
         query_tokens = tokenizer.tokenize(question)
         corpus_size = len(corpus)
-        bm25_k = min(30, corpus_size)  # Don't request more than available
+        bm25_k = min(30, corpus_size)
         bm25_results, _ = bm25_index.retrieve(query_tokens, k=bm25_k)
 
         # Handle both 1D and 2D result shapes
