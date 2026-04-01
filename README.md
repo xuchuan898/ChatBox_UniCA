@@ -45,6 +45,11 @@ Batch question mode (`./questions/*.txt`):
 python chat_box.py --doc-file ./docs/chroma/master.txt --question-file ./questions/questions_batch_example.txt --answer-file ./docs/chroma/answers.txt
 ```
 
+Run full question x document matrix experiment (exports prompts + answers for later AI analysis):
+```bash
+python experiments/run_doc_matrix_experiment.py --question-catalog ./questions/generated_questions_docs_chroma.json
+```
+
 Debug mode (timing, chunks, retrieval details):
 ```bash
 python chat_box.py --doc-file ./docs/chroma/master.txt --debug
@@ -57,6 +62,8 @@ python chat_box.py --doc-file ./docs/chroma/master.txt --debug
 - `docs/chroma/master.txt`: Plain-text version used for format comparison experiments.
 - `docs/chroma/source_urls.txt`: Optional URL list for web/calendar ingestion.
 - `questions/questions_batch_example.txt`: Example batch question file.
+- `questions/generated_questions_docs_chroma.json`: 5 curated questions per document in `docs/chroma` (excluding `source_urls.txt`).
+- `experiments/run_doc_matrix_experiment.py`: Runs all questions against all documents and exports prompts/retrieval/answers.
 
 ## How It Works
 
@@ -73,6 +80,15 @@ python chat_box.py --doc-file ./docs/chroma/master.txt --debug
 - ChromaDB
 - HuggingFace Transformers
 - Ollama
+
+## Matrix Experiment Outputs
+
+`experiments/run_doc_matrix_experiment.py` creates a timestamped folder in `experiments/results/` with:
+
+- `responses.jsonl`: one row per (question, target doc), including rendered prompt, retrieval trace, answer, and timing.
+- `prompts.jsonl`: prompt-focused export for downstream AI analysis.
+- `comparison.csv`: side-by-side answers per question across all target docs.
+- `summary.json` and `summary.md`: aggregate timing and answer-shape metrics.
 
 ## Contributing
 

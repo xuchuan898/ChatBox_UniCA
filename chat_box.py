@@ -3,6 +3,8 @@ import argparse
 import os
 import re
 import time
+import zipfile
+from xml.etree import ElementTree as ET
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 
@@ -87,7 +89,19 @@ def _load_local_doc(doc_file: str) -> list[Document]:
         return TextLoader(doc_file, encoding="utf-8").load()
     if extension == ".pdf":
         return PyPDFLoader(doc_file).load()
-    raise ValueError(f"Unsupported doc extension: {extension}. Supported: .md, .txt, .pdf")
+    if extension == ".docx":
+        with zipfile.ZipFile(doc_file) as zf:
+            xml_bytes = zf.read("word/document.xml")
+        root = ET.fromstring(xml_bytes)
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        paragraphs = []
+        for para in root.findall(".//w:p", ns):
+            parts = [node.text for node in para.findall(".//w:t", ns) if node.text]
+            if parts:
+                paragraphs.append("".join(parts))
+        page_content = "\n".join(paragraphs).strip()
+        return [Document(page_content=page_content, metadata={"source": doc_file, "source_type": "docx"})]
+    raise ValueError(f"Unsupported doc extension: {extension}. Supported: .md, .txt, .pdf, .docx")
 
 
 def load_source_documents(doc_file: str, url_file: str | None = None) -> list[Document]:
@@ -245,7 +259,7 @@ def debug_print_retrieval(retriever, question: str, max_chars: int = 350) -> Non
         print(f"[DEBUG] #{idx} preview={preview}")
 
 
-def chatbox(vectordb, debug: bool = False):
+def chatbox(vectordb, debug: bool = False, return_prompt: bool = False):
     llm = ChatOllama(
         
         model="gemma3:1b",
@@ -282,6 +296,9 @@ def chatbox(vectordb, debug: bool = False):
 
     # Create the retrieval chain (this replaces RetrievalQA)
     qa_chain = create_retrieval_chain(retriever, document_chain)
+
+    if return_prompt:
+        return qa_chain, retriever, prompt
 
     return qa_chain, retriever
 
