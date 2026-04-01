@@ -104,10 +104,22 @@ def ensure_ollama(args: argparse.Namespace) -> dict:
         "ollama_log": str(ollama_log),
         "started": False,
         "ready": False,
+        "model_pulled": False,
     }
 
     if ollama_is_ready(args.ollama_host):
         info["ready"] = True
+        try:
+            result = subprocess.run([
+                str(ollama_bin), "list"
+            ], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if "gemma3:1b" not in result.stdout:
+                pull_result = subprocess.run([
+                    str(ollama_bin), "pull", "gemma3:1b"
+                ], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                info["model_pulled"] = pull_result.returncode == 0
+        except Exception as e:
+            info["model_pulled"] = False
         return info
 
     if not args.auto_start_ollama:
@@ -132,6 +144,20 @@ def ensure_ollama(args: argparse.Namespace) -> dict:
             info["ready"] = True
             break
         time.sleep(1)
+
+    if info["ready"]:
+        try:
+            result = subprocess.run([
+                str(ollama_bin), "list"
+            ], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if "gemma3:1b" not in result.stdout:
+                pull_result = subprocess.run([
+                    str(ollama_bin), "pull", "gemma3:1b"
+                ], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                info["model_pulled"] = pull_result.returncode == 0
+        except Exception as e:
+            info["model_pulled"] = False
+
     return info
 
 
@@ -146,6 +172,19 @@ def extract_metric_line(log_text: str, pattern: str) -> str:
 
 def extract_all_metric_lines(log_text: str, pattern: str) -> list[str]:
     return re.findall(pattern, log_text, re.MULTILINE)
+
+
+def extract_qa_times(log_text: str) -> list[float]:
+    values = re.findall(r"^\[DEBUG\] QA invoke time:\s*([0-9]+(?:\.[0-9]+)?)s$", log_text, re.MULTILINE)
+    return [float(v) for v in values]
+
+
+def extract_retrieval_markdown_blocks(log_text: str) -> list[str]:
+    pattern = re.compile(
+        r"\[DEBUG\]\[RETRIEVE_MD_BEGIN\]\n(.*?)\n\[DEBUG\]\[RETRIEVE_MD_END\]",
+        re.DOTALL,
+    )
+    return [m.strip() for m in pattern.findall(log_text)]
 
 
 def parse_answers(answer_file: Path) -> list[dict]:
@@ -206,10 +245,32 @@ def write_summary_md(run_dir: Path, question_file: Path, runs: list[dict]) -> No
             lines.append(f"- {run['embedding_line']}")
         if run["prepare_line"]:
             lines.append(f"- {run['prepare_line']}")
-        if run["qa_time_lines"]:
-            lines.append("- QA invoke times:")
-            for ql in run["qa_time_lines"]:
-                lines.append(f"  - {ql}")
+        qa_times = run.get("qa_times_sec", [])
+        if qa_times:
+            lines.append(
+                "- QA time(s): "
+                f"count={len(qa_times)}, min={min(qa_times):.2f}, "
+                f"avg={sum(qa_times) / len(qa_times):.2f}, max={max(qa_times):.2f}"
+            )
+        retrieval_calls = run.get("retrieval_calls", 0)
+        if retrieval_calls:
+            lines.append(f"- Retrieval calls: {retrieval_calls}")
+        if run.get("retrieval_base_stats"):
+            lines.append("- Retrieval base score stats (first 3):")
+            for line in run["retrieval_base_stats"][:3]:
+                lines.append(f"  - {line}")
+        if run.get("retrieval_rerank_stats"):
+            lines.append("- Retrieval rerank score stats (first 3):")
+            for line in run["retrieval_rerank_stats"][:3]:
+                lines.append(f"  - {line}")
+        if run.get("retrieval_base_top"):
+            lines.append("- Retrieval base top docs (first 3 lines):")
+            for line in run["retrieval_base_top"][:3]:
+                lines.append(f"  - {line}")
+        if run.get("retrieval_rerank_top"):
+            lines.append("- Retrieval rerank top docs (first 3 lines):")
+            for line in run["retrieval_rerank_top"][:3]:
+                lines.append(f"  - {line}")
         lines.append("")
 
     lines.append("## Notes")
@@ -240,6 +301,41 @@ def write_comparison_csv(run_dir: Path, runs: list[dict]) -> None:
             for tag in tags:
                 row.setdefault(f"answer__{tag}", "")
             writer.writerow(row)
+
+
+def write_retrieval_trace_md(run_dir: Path, runs: list[dict]) -> None:
+    output_path = run_dir / "retrieval_trace.md"
+    lines = [
+        "# Retrieval Trace",
+        "",
+        f"- Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "- Source: debug retrieval markdown blocks from each run log",
+        "",
+    ]
+
+    for run in runs:
+        lines.append(f"## {run['tag']}")
+        lines.append("")
+        blocks = run.get("retrieval_md_blocks", [])
+        answers = run.get("answers", [])
+
+        if not blocks:
+            lines.append("_No retrieval markdown trace found for this run._")
+            lines.append("")
+            continue
+
+        for idx, block in enumerate(blocks, start=1):
+            q_item = answers[idx - 1] if idx - 1 < len(answers) else {}
+            q_id = q_item.get("q_id", idx)
+            question = q_item.get("question", "(question unavailable)")
+            lines.append(f"### Q{q_id}")
+            lines.append("")
+            lines.append(f"- Question: `{question}`")
+            lines.append("")
+            lines.append(block)
+            lines.append("")
+
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> None:
@@ -300,6 +396,13 @@ def main() -> None:
                     "embedding_line": "",
                     "prepare_line": "",
                     "qa_time_lines": [],
+                    "qa_times_sec": [],
+                    "retrieval_calls": 0,
+                    "retrieval_base_stats": [],
+                    "retrieval_rerank_stats": [],
+                    "retrieval_base_top": [],
+                    "retrieval_rerank_top": [],
+                    "retrieval_md_blocks": [],
                     "answers": [],
                 }
             )
@@ -359,6 +462,21 @@ def main() -> None:
                 "embedding_line": extract_metric_line(log_text, r"^\[DEBUG\] Embedding \+ vector DB build time:.*$"),
                 "prepare_line": extract_metric_line(log_text, r"^\[DEBUG\] prepare_data total time:.*$"),
                 "qa_time_lines": extract_all_metric_lines(log_text, r"^\[DEBUG\] QA invoke time:.*$"),
+                "qa_times_sec": extract_qa_times(log_text),
+                "retrieval_calls": len(extract_all_metric_lines(log_text, r"^\[DEBUG\]\[RETRIEVE\] q=.*$")),
+                "retrieval_base_stats": extract_all_metric_lines(
+                    log_text, r"^\[DEBUG\]\[RETRIEVE\]\[BASE_STATS\] .*$"
+                ),
+                "retrieval_rerank_stats": extract_all_metric_lines(
+                    log_text, r"^\[DEBUG\]\[RETRIEVE\]\[RERANK_STATS\] .*$"
+                ),
+                "retrieval_base_top": extract_all_metric_lines(
+                    log_text, r"^\[DEBUG\]\[RETRIEVE\]\[BASE_TOP\] .*$"
+                ),
+                "retrieval_rerank_top": extract_all_metric_lines(
+                    log_text, r"^\[DEBUG\]\[RETRIEVE\]\[RERANK_TOP\] .*$"
+                ),
+                "retrieval_md_blocks": extract_retrieval_markdown_blocks(log_text),
                 "error_hint": error_hint,
                 "answers": parse_answers(answer_path),
             }
@@ -366,12 +484,14 @@ def main() -> None:
 
     write_summary_md(run_dir, question_file, runs)
     write_comparison_csv(run_dir, runs)
+    write_retrieval_trace_md(run_dir, runs)
     (run_dir / "summary.json").write_text(json.dumps(runs, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print("[INFO] Experiment done.", flush=True)
     print(f"[INFO] Output directory: {run_dir}", flush=True)
     print(f"[INFO] Summary: {run_dir / 'summary.md'}", flush=True)
     print(f"[INFO] Comparison CSV: {run_dir / 'comparison.csv'}", flush=True)
+    print(f"[INFO] Retrieval Trace: {run_dir / 'retrieval_trace.md'}", flush=True)
 
 
 if __name__ == "__main__":
