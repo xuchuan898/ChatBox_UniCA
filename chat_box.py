@@ -30,6 +30,23 @@ from bm25s.tokenization import Tokenizer
 URL_SOURCE_FILE = "./docs/chroma/source_urls.txt"
 DEFAULT_DOC_FILE = "./docs/chroma/master.md"
 
+# Prompt template used for debug logging of the final LLM input.
+PROMPT_TEMPLATE = """
+Use ONLY the following context to answer the question.
+The following context is sorted by relevance. The FIRST document is the most important.
+If the answer is not found in the context, say "I don't know."
+Do not add any information not present in the context.
+Keep the answer concise.
+Always say "Merci pour votre question!" at the end of the answer.
+Answer in the same language as the question.
+
+Context:
+{context}
+
+Question: {input}
+Answer:
+"""
+
 
 def _load_source_urls(file_path: str) -> list[str]:
     if not os.path.exists(file_path):
@@ -383,6 +400,7 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
     # Optimized prompt: use only context, no hallucinations
     prompt = ChatPromptTemplate.from_template("""
         Use ONLY the following context to answer the question.
+        The following context is sorted by relevance. The FIRST document is the most important.
         If the answer is not found in the context, say "I don't know."
         Do not add any information not present in the context.
         Keep the answer concise.
@@ -458,7 +476,7 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
         candidates = merged[:50] if len(merged) > 50 else merged
 
         # 5. Rerank
-        reranked_scored = rerank_documents(question, candidates, top_n=8, return_scores=True)
+        reranked_scored = rerank_documents(question, candidates, top_n=1, return_scores=True)
 
         if debug:
             print(f"[DEBUG][RETRIEVE] q={question!r} vec={len(vec_docs)} bm25={len(bm25_docs)} merged={len(merged)} final={len(reranked_scored)}")
@@ -528,6 +546,27 @@ def main() -> None:
 
         answer_lines = []
         for idx, question in enumerate(questions, start=1):
+            # Build prompt context from top retrieved docs (for debug logging)
+            try:
+                docs_for_prompt = retriever.get_relevant_documents(question)
+            except Exception:
+                try:
+                    docs_for_prompt = retriever._get_relevant_documents(question, run_manager=None)
+                except Exception:
+                    docs_for_prompt = []
+
+            context = "\n\n---\n\n".join([d.page_content for d in docs_for_prompt[:8]])
+            prompt_text = PROMPT_TEMPLATE.format(context=context, input=question)
+            if args.debug:
+                print("[DEBUG][PROMPT_MD_BEGIN]")
+                print(f"### LLM Input Prompt (Q{idx})")
+                print(f"- Question: `{_md_escape(question)}`")
+                print("")
+                print("```text")
+                print(prompt_text)
+                print("```")
+                print("[DEBUG][PROMPT_MD_END]")
+
             start_qa = time.perf_counter()
             result = qa_chain.invoke({"input": question})
             qa_time = time.perf_counter() - start_qa
@@ -551,6 +590,26 @@ def main() -> None:
         return
 
     if args.question:
+        # Single question path: build and log prompt
+        try:
+            docs_for_prompt = retriever.get_relevant_documents(args.question)
+        except Exception:
+            try:
+                docs_for_prompt = retriever._get_relevant_documents(args.question, run_manager=None)
+            except Exception:
+                docs_for_prompt = []
+        context = "\n\n---\n\n".join([d.page_content for d in docs_for_prompt[:8]])
+        prompt_text = PROMPT_TEMPLATE.format(context=context, input=args.question)
+        if args.debug:
+            print("[DEBUG][PROMPT_MD_BEGIN]")
+            print(f"### LLM Input Prompt (Q1)")
+            print(f"- Question: `{_md_escape(args.question)}`")
+            print("")
+            print("```text")
+            print(prompt_text)
+            print("```")
+            print("[DEBUG][PROMPT_MD_END]")
+
         start_qa = time.perf_counter()
         result = qa_chain.invoke({"input": args.question})
         if args.debug:
@@ -566,6 +625,25 @@ def main() -> None:
             break
         if not user_input:
             continue
+        try:
+            docs_for_prompt = retriever.get_relevant_documents(user_input)
+        except Exception:
+            try:
+                docs_for_prompt = retriever._get_relevant_documents(user_input, run_manager=None)
+            except Exception:
+                docs_for_prompt = []
+        context = "\n\n---\n\n".join([d.page_content for d in docs_for_prompt[:8]])
+        prompt_text = PROMPT_TEMPLATE.format(context=context, input=user_input)
+        if args.debug:
+            print("[DEBUG][PROMPT_MD_BEGIN]")
+            print(f"### LLM Input Prompt (interactive)")
+            print(f"- Question: `{_md_escape(user_input)}`")
+            print("")
+            print("```text")
+            print(prompt_text)
+            print("```")
+            print("[DEBUG][PROMPT_MD_END]")
+
         start_qa = time.perf_counter()
         result = qa_chain.invoke({"input": user_input})
         if args.debug:

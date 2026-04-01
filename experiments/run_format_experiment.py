@@ -187,6 +187,14 @@ def extract_retrieval_markdown_blocks(log_text: str) -> list[str]:
     return [m.strip() for m in pattern.findall(log_text)]
 
 
+def extract_prompt_markdown_blocks(log_text: str) -> list[str]:
+    pattern = re.compile(
+        r"\[DEBUG\]\[PROMPT_MD_BEGIN\]\n(.*?)\n\[DEBUG\]\[PROMPT_MD_END\]",
+        re.DOTALL,
+    )
+    return [m.strip() for m in pattern.findall(log_text)]
+
+
 def parse_answers(answer_file: Path) -> list[dict]:
     rows = []
     if not answer_file.exists():
@@ -316,24 +324,35 @@ def write_retrieval_trace_md(run_dir: Path, runs: list[dict]) -> None:
     for run in runs:
         lines.append(f"## {run['tag']}")
         lines.append("")
-        blocks = run.get("retrieval_md_blocks", [])
+        retrieval_blocks = run.get("retrieval_md_blocks", [])
+        prompt_blocks = run.get("prompt_md_blocks", [])
         answers = run.get("answers", [])
 
-        if not blocks:
-            lines.append("_No retrieval markdown trace found for this run._")
+        if not retrieval_blocks and not prompt_blocks:
+            lines.append("_No retrieval or prompt markdown trace found for this run._")
             lines.append("")
             continue
 
-        for idx, block in enumerate(blocks, start=1):
-            q_item = answers[idx - 1] if idx - 1 < len(answers) else {}
-            q_id = q_item.get("q_id", idx)
+        # Iterate by index; prefer to align prompt and retrieval blocks by occurrence order
+        max_blocks = max(len(retrieval_blocks), len(prompt_blocks))
+        for idx in range(max_blocks):
+            q_item = answers[idx] if idx < len(answers) else {}
+            q_id = q_item.get("q_id", idx + 1)
             question = q_item.get("question", "(question unavailable)")
             lines.append(f"### Q{q_id}")
             lines.append("")
             lines.append(f"- Question: `{question}`")
             lines.append("")
-            lines.append(block)
-            lines.append("")
+            if idx < len(prompt_blocks):
+                lines.append("#### Prompt sent to LLM")
+                lines.append("")
+                lines.append(prompt_blocks[idx])
+                lines.append("")
+            if idx < len(retrieval_blocks):
+                lines.append("#### Retrieval Trace")
+                lines.append("")
+                lines.append(retrieval_blocks[idx])
+                lines.append("")
 
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -477,6 +496,7 @@ def main() -> None:
                     log_text, r"^\[DEBUG\]\[RETRIEVE\]\[RERANK_TOP\] .*$"
                 ),
                 "retrieval_md_blocks": extract_retrieval_markdown_blocks(log_text),
+                "prompt_md_blocks": extract_prompt_markdown_blocks(log_text),
                 "error_hint": error_hint,
                 "answers": parse_answers(answer_path),
             }
