@@ -97,6 +97,9 @@ def ensure_ollama(args: argparse.Namespace) -> dict:
 
     env = os.environ.copy()
     env["PATH"] = f"{ollama_bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    # Force ollama to use only GPU 0 to avoid multi‑GPU crashes
+    env["CUDA_VISIBLE_DEVICES"] = "0"
+    env["OLLAMA_NUM_GPU"] = "1"
 
     info = {
         "env": env,
@@ -333,7 +336,6 @@ def write_retrieval_trace_md(run_dir: Path, runs: list[dict]) -> None:
             lines.append("")
             continue
 
-        # Iterate by index; prefer to align prompt and retrieval blocks by occurrence order
         max_blocks = max(len(retrieval_blocks), len(prompt_blocks))
         for idx in range(max_blocks):
             q_item = answers[idx] if idx < len(answers) else {}

@@ -2,8 +2,10 @@
 set -euo pipefail
 
 # Environment setup requested by user.
-module load conda
-conda activate /home/bma/conda_envs/chatbox
+#module load conda
+#conda activate /home/bma/conda_envs/chatbox
+#conda init
+#conda activate chatbox
 #cd ChatBox_UniCA
 
 # Ensure we are in repo root even if launched from elsewhere.
@@ -23,6 +25,11 @@ if [ -f "$HOME/.bashrc" ]; then
 fi
 set -u
 
+# ========== Force ollama to use only one GPU (GPU 0) ==========
+export CUDA_VISIBLE_DEVICES=0
+export OLLAMA_NUM_GPU=1
+# ================================================================
+
 mkdir -p ~/ollama
 nohup ~/ollama/bin/ollama serve > ~/ollama/ollama.log 2>&1 &
 
@@ -33,5 +40,3 @@ ollama pull gemma3:1b
 
 # Launch experiment script (pass through extra args if provided).
 python experiments/run_format_experiment.py --auto-start-ollama "$@"
-
-
