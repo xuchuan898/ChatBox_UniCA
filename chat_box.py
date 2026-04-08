@@ -540,10 +540,10 @@ def _print_retrieval_markdown(question: str, base_scored: list[tuple[Document, f
     print(f"- Reranked kept: {len(reranked_scored)}")
     print("")
 
-    print("#### Base Retrieval (Top 5)")
+    print(f"#### Base Retrieval (All {len(base_scored)})")
     print("| Rank | Score | Source | Type | Chunk Type | Preview |")
     print("| ---: | ---: | --- | --- | --- | --- |")
-    for idx, (doc, score) in enumerate(base_scored[:5], 1):
+    for idx, (doc, score) in enumerate(base_scored, 1):
         source = _md_escape(_short_source(doc))
         source_type = _md_escape(str(doc.metadata.get("source_type", "unknown")))
         chunk_type = _md_escape(str(doc.metadata.get("chunk_type", "unknown")))
@@ -551,10 +551,10 @@ def _print_retrieval_markdown(question: str, base_scored: list[tuple[Document, f
         print(f"| {idx} | {score:.4f} | {source} | {source_type} | {chunk_type} | {preview} |")
 
     print("")
-    print("#### Rerank Result (Top 5)")
+    print(f"#### Rerank Result (All {len(reranked_scored)})")
     print("| Rank | Rerank Score | Source | Type | Chunk Type | Preview |")
     print("| ---: | ---: | --- | --- | --- | --- |")
-    for idx, (doc, score) in enumerate(reranked_scored[:5], 1):
+    for idx, (doc, score) in enumerate(reranked_scored, 1):
         source = _md_escape(_short_source(doc))
         source_type = _md_escape(str(doc.metadata.get("source_type", "unknown")))
         chunk_type = _md_escape(str(doc.metadata.get("chunk_type", "unknown")))
@@ -604,6 +604,9 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
 
     # Load reranker model (supports English and French)
     reranker = CrossEncoder('nvidia/llama-nemotron-rerank-1b-v2', trust_remote_code=True)
+    # Reuse retrieval results for the immediate second call with the same query
+    # (prompt preview call -> qa_chain internal call) to keep traces and prompt context aligned.
+    retrieval_cache: dict[str, list[Document]] = {}
 
     def rerank_documents(query, documents, top_n=8, return_scores=False):
         if not documents:
@@ -619,14 +622,31 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
 
     def rrf_fusion(vector_docs, bm25_docs, k=60):
         scores = defaultdict(float)
+        docs_by_content = {}
         for rank, doc in enumerate(vector_docs, 1):
             scores[doc.page_content] += 1 / (k + rank)
+            docs_by_content.setdefault(doc.page_content, doc)
         for rank, doc in enumerate(bm25_docs, 1):
             scores[doc.page_content] += 1 / (k + rank)
+            docs_by_content.setdefault(doc.page_content, doc)
         sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        return [Document(page_content=text) for text, _ in sorted_items]
+        return [(docs_by_content[text], score) for text, score in sorted_items]
+
+    def _score_stats_line(scores: list[float]) -> str:
+        if not scores:
+            return "count=0"
+        return (
+            f"count={len(scores)} min={min(scores):.4f} "
+            f"avg={(sum(scores) / len(scores)):.4f} max={max(scores):.4f}"
+        )
 
     def custom_retriever(question):
+        if question in retrieval_cache:
+            cached_docs = retrieval_cache.pop(question)
+            if debug:
+                print(f"[DEBUG][RETRIEVE][CACHE_HIT] q={question!r} docs={len(cached_docs)}")
+            return cached_docs
+
         # 1. Vector retrieval (MMR) with filter
         vec_docs = base_retriever.invoke(question)
 
@@ -652,25 +672,39 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
         bm25_docs = [Document(page_content=corpus[idx]) for idx in indices]
 
         # 3. RRF fusion
-        merged = rrf_fusion(vec_docs, bm25_docs, k=60)
+        merged_scored = rrf_fusion(vec_docs, bm25_docs, k=60)
 
         # 4. Take top 50 candidates (or fewer)
-        candidates = merged[:50] if len(merged) > 50 else merged
+        base_scored = merged_scored[:50] if len(merged_scored) > 50 else merged_scored
+        candidates = [doc for doc, _ in base_scored]
 
         # 5. Rerank
-        reranked_scored = rerank_documents(question, candidates, top_n=5, return_scores=True)
+        reranked_all_scored = rerank_documents(question, candidates, top_n=len(candidates), return_scores=True)
+        answer_top_k = 5
+        reranked_for_answer = reranked_all_scored[:answer_top_k]
 
         if debug:
-            print(f"[DEBUG][RETRIEVE] q={question!r} vec={len(vec_docs)} bm25={len(bm25_docs)} merged={len(merged)} final={len(reranked_scored)}")
-            for idx, (doc, score) in enumerate(reranked_scored[:3], 1):
+            print(f"[DEBUG][RETRIEVE] q={question!r} base_count={len(base_scored)} rerank_count={len(reranked_all_scored)}")
+            print(f"[DEBUG][RETRIEVE][PIPELINE] vec={len(vec_docs)} bm25={len(bm25_docs)} merged={len(merged_scored)} answer_top_k={answer_top_k}")
+
+            base_scores = [score for _, score in base_scored]
+            rerank_scores = [score for _, score in reranked_all_scored]
+            print(f"[DEBUG][RETRIEVE][BASE_STATS] {_score_stats_line(base_scores)}")
+            print(f"[DEBUG][RETRIEVE][RERANK_STATS] {_score_stats_line(rerank_scores)}")
+
+            for idx, (doc, score) in enumerate(base_scored, 1):
                 source = _short_source(doc)
-                print(f"[DEBUG][TOP{idx}] score={score:.4f} source={source}")
+                print(f"[DEBUG][RETRIEVE][BASE_TOP] rank={idx} score={score:.4f} source={source}")
 
-            # For backward compatibility, produce a dummy base_scored list for markdown print
-            dummy_base = [(doc, 0.0) for doc in candidates[:10]]
-            _print_retrieval_markdown(question, dummy_base, reranked_scored)
+            for idx, (doc, score) in enumerate(reranked_all_scored, 1):
+                source = _short_source(doc)
+                print(f"[DEBUG][RETRIEVE][RERANK_TOP] rank={idx} score={score:.4f} source={source}")
 
-        return [doc for doc, _ in reranked_scored]
+            _print_retrieval_markdown(question, base_scored, reranked_all_scored)
+
+        docs_for_answer = [doc for doc, _ in reranked_for_answer]
+        retrieval_cache[question] = docs_for_answer
+        return docs_for_answer
 
     class CustomRetriever(BaseRetriever):
         def _get_relevant_documents(

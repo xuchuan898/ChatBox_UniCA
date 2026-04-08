@@ -184,7 +184,7 @@ def extract_qa_times(log_text: str) -> list[float]:
 
 def extract_retrieval_markdown_blocks(log_text: str) -> list[str]:
     pattern = re.compile(
-        r"^\\[DEBUG\\]\\[RETRIEVE_MD_BEGIN\\]\\n(.*?)\\n\\[DEBUG\\]\\[RETRIEVE_MD_END\\]$",
+        r"^\[DEBUG\]\[RETRIEVE_MD_BEGIN\]\n(.*?)\n\[DEBUG\]\[RETRIEVE_MD_END\]$",
         re.DOTALL | re.MULTILINE,
     )
     return [m.strip() for m in pattern.findall(log_text)]
@@ -192,7 +192,7 @@ def extract_retrieval_markdown_blocks(log_text: str) -> list[str]:
 
 def extract_prompt_markdown_blocks(log_text: str) -> list[str]:
     pattern = re.compile(
-        r"^\\[DEBUG\\]\\[PROMPT_MD_BEGIN\\]\\n(.*?)\\n\\[DEBUG\\]\\[PROMPT_MD_END\\]$",
+        r"^\[DEBUG\]\[PROMPT_MD_BEGIN\]\n(.*?)\n\[DEBUG\]\[PROMPT_MD_END\]$",
         re.DOTALL | re.MULTILINE,
     )
     return [m.strip() for m in pattern.findall(log_text)]
@@ -205,7 +205,7 @@ def extract_retrieval_events(log_text: str) -> list[dict]:
     for raw_line in log_text.splitlines():
         line = raw_line.strip()
         q_match = re.match(
-            r"^\\[DEBUG\\]\\[RETRIEVE\\] q=(['\"])(.*)\\1 base_count=(\\d+) rerank_count=(\\d+)$",
+            r"^\[DEBUG\]\[RETRIEVE\] q=(['\"])(.*)\1 base_count=(\d+) rerank_count=(\d+)$",
             line,
         )
         if q_match:
@@ -225,18 +225,18 @@ def extract_retrieval_events(log_text: str) -> list[dict]:
         if not current:
             continue
 
-        base_stats_match = re.match(r"^\\[DEBUG\\]\\[RETRIEVE\\]\\[BASE_STATS\\] (.*)$", line)
+        base_stats_match = re.match(r"^\[DEBUG\]\[RETRIEVE\]\[BASE_STATS\] (.*)$", line)
         if base_stats_match:
             current["base_stats"] = base_stats_match.group(1)
             continue
 
-        rerank_stats_match = re.match(r"^\\[DEBUG\\]\\[RETRIEVE\\]\\[RERANK_STATS\\] (.*)$", line)
+        rerank_stats_match = re.match(r"^\[DEBUG\]\[RETRIEVE\]\[RERANK_STATS\] (.*)$", line)
         if rerank_stats_match:
             current["rerank_stats"] = rerank_stats_match.group(1)
             continue
 
         base_top_match = re.match(
-            r"^\\[DEBUG\\]\\[RETRIEVE\\]\\[BASE_TOP\\] rank=(\\d+) score=([0-9]+(?:\\.[0-9]+)?) source=(.*)$",
+            r"^\[DEBUG\]\[RETRIEVE\]\[BASE_TOP\] rank=(\d+) score=([0-9]+(?:\.[0-9]+)?) source=(.*)$",
             line,
         )
         if base_top_match:
@@ -251,7 +251,7 @@ def extract_retrieval_events(log_text: str) -> list[dict]:
             continue
 
         rerank_top_match = re.match(
-            r"^\\[DEBUG\\]\\[RETRIEVE\\]\\[RERANK_TOP\\] rank=(\\d+) score=([0-9]+(?:\\.[0-9]+)?) source=(.*)$",
+            r"^\[DEBUG\]\[RETRIEVE\]\[RERANK_TOP\] rank=(\d+) score=([0-9]+(?:\.[0-9]+)?) source=(.*)$",
             line,
         )
         if rerank_top_match:
@@ -315,7 +315,7 @@ def parse_retrieval_markdown_block(block: str) -> dict:
     }
 
 
-def render_retrieval_fallback(event: dict) -> str:
+def render_retrieval_fallback(event: dict, max_items: int | None = 5) -> str:
     lines = ["#### Retrieval Trace (fallback from debug lines)", ""]
     lines.append(f"- Question: `{event.get('question', '')}`")
     lines.append(f"- Base candidates: {event.get('base_count', 0)}")
@@ -332,7 +332,8 @@ def render_retrieval_fallback(event: dict) -> str:
         lines.append("#### Base Top")
         lines.append("| Rank | Score | Source |")
         lines.append("| ---: | ---: | --- |")
-        for item in base_top[:5]:
+        base_items = base_top if max_items is None else base_top[:max_items]
+        for item in base_items:
             lines.append(f"| {item['rank']} | {item['score']:.4f} | {item['source']} |")
 
     rerank_top = event.get("rerank_top", [])
@@ -341,7 +342,8 @@ def render_retrieval_fallback(event: dict) -> str:
         lines.append("#### Rerank Top")
         lines.append("| Rank | Score | Source |")
         lines.append("| ---: | ---: | --- |")
-        for item in rerank_top[:5]:
+        rerank_items = rerank_top if max_items is None else rerank_top[:max_items]
+        for item in rerank_items:
             lines.append(f"| {item['rank']} | {item['score']:.4f} | {item['source']} |")
 
     return "\n".join(lines)
@@ -544,14 +546,9 @@ def write_retrieval_trace_md(run_dir: Path, runs: list[dict]) -> None:
             # Prompt details block
             prompt_text = item.get("prompt", "").strip()
             if prompt_text:
-                lines.append("<details>")
-                lines.append("<summary>Prompt sent to LLM</summary>")
+                lines.append("#### Prompt sent to LLM")
                 lines.append("")
-                lines.append("```text")
                 lines.append(prompt_text)
-                lines.append("```")
-                lines.append("")
-                lines.append("</details>")
                 lines.append("")
 
             # Retrieval details block
@@ -561,12 +558,75 @@ def write_retrieval_trace_md(run_dir: Path, runs: list[dict]) -> None:
                 event = item.get("event", {})
                 retrieval_detail = render_retrieval_fallback(event) if event else "_No retrieval trace captured._"
 
-            lines.append("<details>")
-            lines.append("<summary>Retrieval details</summary>")
+            lines.append("#### Retrieval details")
             lines.append("")
             lines.append(retrieval_detail)
             lines.append("")
-            lines.append("</details>")
+
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_retrieval_full_md(run_dir: Path, runs: list[dict]) -> None:
+    output_path = run_dir / "retrieval_full.md"
+    lines = [
+        "# Retrieval Full Results",
+        "",
+        f"- Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "- Purpose: full base retrieval and rerank details per question/doc",
+        "",
+    ]
+
+    for run in runs:
+        lines.append(f"## {run['tag']}")
+        lines.append("")
+
+        answers = run.get("answers", [])
+        retrieval_blocks = run.get("retrieval_md_blocks", [])
+        retrieval_events = run.get("retrieval_events", [])
+        parsed_blocks = [parse_retrieval_markdown_block(block) for block in retrieval_blocks]
+        item_count = max(len(answers), len(parsed_blocks), len(retrieval_events))
+
+        if item_count == 0:
+            lines.append("_No retrieval data captured for this run._")
+            lines.append("")
+            continue
+
+        for idx in range(item_count):
+            answer_item = answers[idx] if idx < len(answers) else {}
+            block_item = parsed_blocks[idx] if idx < len(parsed_blocks) else {}
+            event_item = retrieval_events[idx] if idx < len(retrieval_events) else {}
+
+            q_id = answer_item.get("q_id", idx + 1)
+            question = (
+                answer_item.get("question")
+                or block_item.get("question")
+                or event_item.get("question")
+                or "(question unavailable)"
+            )
+
+            lines.append(f"### Q{q_id}")
+            lines.append("")
+            lines.append(f"- Question: `{question}`")
+
+            base_candidates = block_item.get("base_candidates")
+            reranked_kept = block_item.get("reranked_kept")
+            if base_candidates is None:
+                base_candidates = event_item.get("base_count", "-")
+            if reranked_kept is None:
+                reranked_kept = event_item.get("rerank_count", "-")
+            lines.append(f"- Base candidates: {base_candidates}")
+            lines.append(f"- Reranked kept: {reranked_kept}")
+            lines.append("")
+
+            retrieval_detail = block_item.get("cleaned_text", "").strip()
+            if not retrieval_detail:
+                retrieval_detail = (
+                    render_retrieval_fallback(event_item, max_items=None)
+                    if event_item
+                    else "_No retrieval trace captured._"
+                )
+
+            lines.append(retrieval_detail)
             lines.append("")
 
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -719,17 +779,17 @@ def main() -> None:
             "log_path": str(log_path),
             "answer_path": str(answer_path),
             "chunk_path": str(chunk_path),
-            "loaded_line": extract_metric_line(log_text, r"^\\[DEBUG\\] Loaded documents:.*$"),
-            "chunks_line": extract_metric_line(log_text, r"^\\[DEBUG\\] Total chunks after split:.*$"),
-            "embedding_line": extract_metric_line(log_text, r"^\\[DEBUG\\] Embedding \\+ vector DB build time:.*$"),
-            "prepare_line": extract_metric_line(log_text, r"^\\[DEBUG\\] prepare_data total time:.*$"),
-            "qa_time_lines": extract_all_metric_lines(log_text, r"^\\[DEBUG\\] QA invoke time:.*$"),
+            "loaded_line": extract_metric_line(log_text, r"^\[DEBUG\] Loaded documents:.*$"),
+            "chunks_line": extract_metric_line(log_text, r"^\[DEBUG\] Total chunks after split:.*$"),
+            "embedding_line": extract_metric_line(log_text, r"^\[DEBUG\] Embedding \+ vector DB build time:.*$"),
+            "prepare_line": extract_metric_line(log_text, r"^\[DEBUG\] prepare_data total time:.*$"),
+            "qa_time_lines": extract_all_metric_lines(log_text, r"^\[DEBUG\] QA invoke time:.*$"),
             "qa_times_sec": extract_qa_times(log_text),
-            "retrieval_calls": len(extract_all_metric_lines(log_text, r"^\\[DEBUG\\]\\[RETRIEVE\\] q=.*$")),
-            "retrieval_base_stats": extract_all_metric_lines(log_text, r"^\\[DEBUG\\]\\[RETRIEVE\\]\\[BASE_STATS\\] .*$"),
-            "retrieval_rerank_stats": extract_all_metric_lines(log_text, r"^\\[DEBUG\\]\\[RETRIEVE\\]\\[RERANK_STATS\\] .*$"),
-            "retrieval_base_top": extract_all_metric_lines(log_text, r"^\\[DEBUG\\]\\[RETRIEVE\\]\\[BASE_TOP\\] .*$"),
-            "retrieval_rerank_top": extract_all_metric_lines(log_text, r"^\\[DEBUG\\]\\[RETRIEVE\\]\\[RERANK_TOP\\] .*$"),
+            "retrieval_calls": len(extract_all_metric_lines(log_text, r"^\[DEBUG\]\[RETRIEVE\] q=.*$")),
+            "retrieval_base_stats": extract_all_metric_lines(log_text, r"^\[DEBUG\]\[RETRIEVE\]\[BASE_STATS\] .*$"),
+            "retrieval_rerank_stats": extract_all_metric_lines(log_text, r"^\[DEBUG\]\[RETRIEVE\]\[RERANK_STATS\] .*$"),
+            "retrieval_base_top": extract_all_metric_lines(log_text, r"^\[DEBUG\]\[RETRIEVE\]\[BASE_TOP\] .*$"),
+            "retrieval_rerank_top": extract_all_metric_lines(log_text, r"^\[DEBUG\]\[RETRIEVE\]\[RERANK_TOP\] .*$"),
             "retrieval_md_blocks": extract_retrieval_markdown_blocks(log_text),
             "prompt_md_blocks": extract_prompt_markdown_blocks(log_text),
             "retrieval_events": extract_retrieval_events(log_text),
@@ -741,6 +801,7 @@ def main() -> None:
     write_summary_md(run_dir, question_file, runs)
     write_comparison_csv(run_dir, runs)
     write_retrieval_trace_md(run_dir, runs)
+    write_retrieval_full_md(run_dir, runs)
     (run_dir / "summary.json").write_text(json.dumps(runs, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print("[INFO] Experiment done.", flush=True)
@@ -748,6 +809,7 @@ def main() -> None:
     print(f"[INFO] Summary: {run_dir / 'summary.md'}", flush=True)
     print(f"[INFO] Comparison CSV: {run_dir / 'comparison.csv'}", flush=True)
     print(f"[INFO] Retrieval Trace: {run_dir / 'retrieval_trace.md'}", flush=True)
+    print(f"[INFO] Retrieval Full: {run_dir / 'retrieval_full.md'}", flush=True)
 
 
 if __name__ == "__main__":
