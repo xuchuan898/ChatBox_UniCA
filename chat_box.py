@@ -3,17 +3,15 @@ import argparse
 import os
 import re
 import time
-import zipfile
-import numpy as np
-from xml.etree import ElementTree as ET
+ 
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 from collections import defaultdict
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Optional, Dict
 
 from langchain_classic.chains import create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
-from langchain_community.document_loaders import PyPDFLoader, TextLoader, WebBaseLoader
+from langchain_community.document_loaders import TextLoader, WebBaseLoader
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
@@ -29,9 +27,9 @@ from bm25s.tokenization import Tokenizer
 
 # For PDF to Markdown conversion
 try:
-    import pymupdf4llm
+    from docling.document_converter import DocumentConverter
 except ImportError:
-    pymupdf4llm = None
+    DocumentConverter = None
 
 # For DOCX to Markdown conversion
 try:
@@ -122,29 +120,34 @@ def _load_web_docs(url: str) -> list[Document]:
 
 def _load_local_doc(doc_file: str) -> list[Document]:
     extension = os.path.splitext(doc_file)[1].lower()
-    if extension == ".md":
+
+    if extension == ".md" or extension == ".txt":
         return TextLoader(doc_file, encoding="utf-8").load()
-    if extension == ".txt":
-        return TextLoader(doc_file, encoding="utf-8").load()
+
     if extension == ".pdf":
-        if pymupdf4llm is None:
-            raise ImportError("pymupdf4llm is required for PDF conversion. Install with: pip install pymupdf4llm")
-        # Convert PDF to Markdown
-        md_text = pymupdf4llm.to_markdown(doc_file)
-        return [Document(
-            page_content=md_text,
-            metadata={"source": doc_file, "source_type": "pdf_md"}
-        )]
+        if DocumentConverter is None:
+            raise ImportError("docling is required for PDF conversion. Install with: pip install docling")
+        else:
+            converter = DocumentConverter()
+            result = converter.convert(doc_file)
+            md_text = result.document.export_to_markdown()
+            return [Document(
+                page_content=md_text,
+                metadata={"source": doc_file, "source_type": "pdf_md"}
+            )]
+
     if extension == ".docx":
         if mammoth is None:
             raise ImportError("mammoth is required for DOCX conversion. Install with: pip install mammoth")
-        with open(doc_file, "rb") as f:
-            result = mammoth.convert_to_markdown(f)
-            md_text = result.value
-        return [Document(
-            page_content=md_text,
-            metadata={"source": doc_file, "source_type": "docx_md"}
-        )]
+        else:
+            with open(doc_file, "rb") as f:
+                result = mammoth.convert_to_markdown(f)
+                md_text = result.value
+            return [Document(
+                page_content=md_text,
+                metadata={"source": doc_file, "source_type": "docx_md"}
+            )]
+
     raise ValueError(f"Unsupported doc extension: {extension}. Supported: .md, .txt, .pdf, .docx")
 
 
@@ -256,55 +259,56 @@ def _is_table(content: str) -> bool:
     return pipe_count > 2
 
 
-def _adaptive_split_documents(docs: List[Document], debug: bool = False) -> List[Document]:
-    """
-    Advanced adaptive chunking that handles:
-    - Markdown/web: header-based splitting (preserves H1-H4)
-    - PDF/Word converted to Markdown: same as Markdown
-    - TXT: use TxtStructureParser for semantic chunking + type labeling
-    - Tables/ lists: kept intact
-    - Recursive split if chunk too long (>1500 chars)
-    """
+def _adaptive_split_documents(docs: List[Document], debug: bool = False, save_chunks_file: str = None) -> List[Document]:
     final_chunks = []
+    chunk_records = []
+
     headers_to_split_on = [
         ("#", "H1"),
         ("##", "H2"),
         ("###", "H3"),
         ("####", "H4"),
     ]
-    markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
+
+    # Using strip_headers=False to keep the actual header text within the content
+    markdown_splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=headers_to_split_on,
+        strip_headers=False
+    )
+
+    # Enhanced separators to prioritize sentence boundaries and avoid splitting mid-sentence
     recursive_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
-        chunk_overlap=200,
-        separators=["\n\n", "\n", ".", " ", ""],
+        chunk_overlap=150,
+        separators=["\n\n", "\n", ". ", "? ", "! ", " ", ""],
     )
-    # TXT parser instance (custom rules can be added later)
+
     txt_parser = TxtStructureParser()
 
     for doc in docs:
         source_type = doc.metadata.get("source_type", "unknown")
         content = doc.page_content
 
-        # Special case: discord links or error docs – keep as single chunk
+        # Simple regex to remove common PDF conversion noise like page numbers
+        content = re.sub(r"(?i)page \d+ (of|/) \d+", "", content)
+
         if source_type in {"discord_link", "load_error"}:
             final_chunks.append(doc)
             continue
 
         # ------------------------------------------------------------
-        # Case 1: TXT files – use intelligent structure parser
+        # Case 1: TXT files - Semantic structure parsing
         # ------------------------------------------------------------
         if source_type == "txt":
             txt_chunks = txt_parser.parse(content)
-            # Inherit original metadata (source, source_type, etc.)
             for chunk in txt_chunks:
                 chunk.metadata.update(doc.metadata)
-                # Ensure chunk_type is set; if not, default to general
                 chunk.metadata.setdefault("chunk_type", "general")
             final_chunks.extend(txt_chunks)
             continue
 
         # ------------------------------------------------------------
-        # Case 2: Markdown / converted PDF/DOCX (source_type contains "md")
+        # Case 2: Markdown / Converted PDF & DOCX - Hierarchical Breadcrumbs
         # ------------------------------------------------------------
         if source_type in {"web", "markdown", "pdf_md", "docx_md"} or content.strip().startswith("#"):
             try:
@@ -313,27 +317,26 @@ def _adaptive_split_documents(docs: List[Document], debug: bool = False) -> List
                 splits = [Document(page_content=content, metadata=doc.metadata)]
 
             for split_doc in splits:
-                # Add header context if available
-                header_ctx = " ".join([
-                    split_doc.metadata.get("H1", ""),
-                    split_doc.metadata.get("H2", ""),
-                    split_doc.metadata.get("H3", ""),
-                    split_doc.metadata.get("H4", ""),
-                ])
-                if header_ctx:
-                    split_doc.page_content = header_ctx + "\n" + split_doc.page_content
+                # Hierarchical Breadcrumb Injection: Build a context path (H1 > H2 > H3)
+                path_elements = [split_doc.metadata.get(h, "") for h in ["H1", "H2", "H3", "H4"]]
+                full_path = " > ".join([p.strip() for p in path_elements if p])
 
-                # Try to detect chunk_type (simple heuristics)
+                # Update metadata with the original source info
+                split_doc.metadata.update(doc.metadata)
+
+                # Prepend breadcrumbs to content for better retrieval grounding
+                if full_path:
+                    split_doc.page_content = f"[Context: {full_path}]\n{split_doc.page_content}"
+
                 chunk_type = _guess_chunk_type(split_doc.page_content)
                 split_doc.metadata["chunk_type"] = chunk_type
 
-                # Table protection
                 if _is_table(split_doc.page_content) or "|" in split_doc.page_content:
                     final_chunks.append(split_doc)
                     continue
 
-                # Length control
-                if len(split_doc.page_content) > 1500:
+                # Secondary split if the header-based chunk is still too large
+                if len(split_doc.page_content) > 1200:
                     sub_chunks = recursive_splitter.split_documents([split_doc])
                     for sub in sub_chunks:
                         sub.metadata["chunk_type"] = chunk_type
@@ -343,27 +346,22 @@ def _adaptive_split_documents(docs: List[Document], debug: bool = False) -> List
             continue
 
         # ------------------------------------------------------------
-        # Case 3: Plain text (e.g., from PDF/Word without conversion) – fallback to paragraph splitting
+        # Case 3: Fallback - Paragraph and Sentence-aware splitting
         # ------------------------------------------------------------
-        # Split by paragraphs (double newline)
         paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
         if not paragraphs:
             paragraphs = [content]
 
         for para in paragraphs:
-            # Create a temporary Document for this paragraph
             para_doc = Document(page_content=para, metadata=doc.metadata.copy())
-            # Guess chunk type
             chunk_type = _guess_chunk_type(para)
             para_doc.metadata["chunk_type"] = chunk_type
 
-            # Table protection
             if _is_table(para) or "|" in para:
                 final_chunks.append(para_doc)
                 continue
 
-            # Length control
-            if len(para) > 1500:
+            if len(para) > 1200:
                 sub_chunks = recursive_splitter.split_documents([para_doc])
                 for sub in sub_chunks:
                     sub.metadata["chunk_type"] = chunk_type
@@ -375,13 +373,26 @@ def _adaptive_split_documents(docs: List[Document], debug: bool = False) -> List
         print(f"[DEBUG] Adaptive split: total chunks = {len(final_chunks)}")
         if final_chunks:
             lengths = [len(c.page_content) for c in final_chunks]
-            print(f"[DEBUG] Chunk length stats: min={min(lengths)} max={max(lengths)} avg={sum(lengths)/len(lengths):.0f}")
-            # Count chunk types
+            print(
+                f"[DEBUG] Chunk length stats: min={min(lengths)} max={max(lengths)} avg={sum(lengths) / len(lengths):.0f}")
             types = defaultdict(int)
             for c in final_chunks:
                 typ = c.metadata.get("chunk_type", "unknown")
                 types[typ] += 1
             print(f"[DEBUG] Chunk type distribution: {dict(types)}")
+
+    # Save chunk info if requested
+    if save_chunks_file:
+        import json
+        with open(save_chunks_file, "w", encoding="utf-8") as f:
+            for c in final_chunks:
+                record = {
+                    "content": c.page_content,
+                    "chunk_type": c.metadata.get("chunk_type", "unknown"),
+                    "source": c.metadata.get("source", "unknown"),
+                    "length": len(c.page_content),
+                }
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     return final_chunks
 
@@ -401,7 +412,7 @@ def _guess_chunk_type(text: str) -> str:
     return "general"
 
 
-def prepare_data(doc_file: str, url_file: str | None = None, debug: bool = False):
+def prepare_data(doc_file: str, url_file: str | None = None, debug: bool = False, save_chunks_file: str | None = None):
     start_total = time.perf_counter()
     embeddings = HuggingFaceEmbeddings(model_name="intfloat/multilingual-e5-base")
     start_load = time.perf_counter()
@@ -409,7 +420,7 @@ def prepare_data(doc_file: str, url_file: str | None = None, debug: bool = False
     load_time = time.perf_counter() - start_load
 
     # Adaptive document chunking (now with TXT intelligence and converted PDF/DOCX)
-    texts = _adaptive_split_documents(docs, debug=debug)
+    texts = _adaptive_split_documents(docs, debug=debug, save_chunks_file=save_chunks_file)
 
     # Build vector database
     start_embedding = time.perf_counter()
@@ -457,7 +468,7 @@ def parse_args() -> argparse.Namespace:
         "--question-file",
         type=str,
         default=None,
-        help="Optional path to a text file containing batch questions (one per line).",
+        help="Optional path to a text file with batch questions, one per line",
     )
     parser.add_argument(
         "--answer-file",
@@ -469,6 +480,12 @@ def parse_args() -> argparse.Namespace:
         "--debug",
         action="store_true",
         help="Enable debug logging: timing, chunk stats, and retrieval details.",
+    )
+    parser.add_argument(
+        "--save-chunks-file",
+        type=str,
+        default=None,
+        help="If set, save all generated chunks to this file (JSONL)",
     )
     return parser.parse_args()
 
@@ -641,7 +658,7 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
         candidates = merged[:50] if len(merged) > 50 else merged
 
         # 5. Rerank
-        reranked_scored = rerank_documents(question, candidates, top_n=1, return_scores=True)
+        reranked_scored = rerank_documents(question, candidates, top_n=5, return_scores=True)
 
         if debug:
             print(f"[DEBUG][RETRIEVE] q={question!r} vec={len(vec_docs)} bm25={len(bm25_docs)} merged={len(merged)} final={len(reranked_scored)}")
@@ -694,6 +711,7 @@ def main() -> None:
         doc_file=args.doc_file,
         url_file=args.url_file,
         debug=args.debug,
+        save_chunks_file=args.save_chunks_file,
     )
 
     qa_chain, retriever = chatbox(
@@ -820,3 +838,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
