@@ -428,9 +428,9 @@ def prepare_data(doc_file: str, url_file: str | None = None, debug: bool = False
     embedding_time = time.perf_counter() - start_embedding
 
     # Build BM25 index for hybrid search
-    corpus = [doc.page_content for doc in texts]
+    corpus_texts = [doc.page_content for doc in texts]
     tokenizer = Tokenizer()
-    corpus_tokens = tokenizer.tokenize(corpus)
+    corpus_tokens = tokenizer.tokenize(corpus_texts)
     bm25_index = bm25s.BM25()
     bm25_index.index(corpus_tokens)
 
@@ -440,7 +440,8 @@ def prepare_data(doc_file: str, url_file: str | None = None, debug: bool = False
         print(f"[DEBUG] Embedding + vector DB build time: {embedding_time:.2f}s")
         print(f"[DEBUG] prepare_data total time: {time.perf_counter() - start_total:.2f}s")
 
-    return vectordb, bm25_index, tokenizer, corpus
+    # Return full chunk Documents as corpus so hybrid retrieval can keep metadata.
+    return vectordb, bm25_index, tokenizer, texts
 
 
 def parse_args() -> argparse.Namespace:
@@ -591,14 +592,14 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
         Answer:
     """)
 
-    # Base retriever: MMR with larger candidate pool, excluding staff chunks
+    # Base retriever: MMR with larger candidate pool.
+    # Keep all chunk types and apply only soft penalties later.
     base_retriever = vectordb.as_retriever(
         search_type="mmr",
         search_kwargs={
             "k": 30,
             "fetch_k": 50,
             "lambda_mult": 0.7,
-            "filter": {"chunk_type": {"$ne": "staff"}}   # exclude staff/responsible lists
         }
     )
 
@@ -607,6 +608,10 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
     # Reuse retrieval results for the immediate second call with the same query
     # (prompt preview call -> qa_chain internal call) to keep traces and prompt context aligned.
     retrieval_cache: dict[str, list[Document]] = {}
+    corpus_docs = [
+        item if isinstance(item, Document) else Document(page_content=str(item), metadata={})
+        for item in corpus
+    ]
 
     def rerank_documents(query, documents, top_n=8, return_scores=False):
         if not documents:
@@ -620,17 +625,121 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
             return top_scored
         return [doc for doc, _ in top_scored]
 
-    def rrf_fusion(vector_docs, bm25_docs, k=60):
+    def _detect_query_language(text: str) -> str:
+        lower = text.lower()
+        fr_markers = [
+            " le ", " la ", " les ", " des ", " du ", " un ", " une ",
+            "dans", "avec", "pour", "est", "sont", "responsable", "durée", "courriel",
+        ]
+        en_markers = [
+            " the ", " and ", " for ", " with ", " what ", " which ", " is ", " are ",
+            "duration", "internship", "email", "responsible",
+        ]
+        fr_score = sum(marker in f" {lower} " for marker in fr_markers)
+        en_score = sum(marker in f" {lower} " for marker in en_markers)
+        if re.search(r"[àâçéèêëîïôûùüÿœ]", lower):
+            fr_score += 2
+        if fr_score >= en_score + 1:
+            return "fr"
+        return "en"
+
+    def _replace_terms(text: str, mapping: dict[str, str]) -> str:
+        updated = text
+        for source, target in mapping.items():
+            updated = re.sub(rf"\b{re.escape(source)}\b", target, updated, flags=re.IGNORECASE)
+        return updated
+
+    def _build_query_variants(question: str) -> list[str]:
+        base = " ".join(question.split())
+        variants = [base]
+        lang = _detect_query_language(base)
+        en_to_fr = {
+            "work-study": "alternance",
+            "responsible": "responsable",
+            "email": "courriel",
+            "address": "adresse",
+            "internship": "stage",
+            "duration": "duree",
+            "compulsory": "obligatoire",
+            "mandatory": "obligatoire",
+            "pedagogical objectives": "objectifs pedagogiques",
+            "program": "parcours",
+            "track": "parcours",
+        }
+        fr_to_en = {
+            "alternance": "work-study",
+            "responsable": "responsible",
+            "courriel": "email",
+            "adresse": "address",
+            "stage": "internship",
+            "duree": "duration",
+            "durée": "duration",
+            "obligatoire": "mandatory",
+            "objectifs pedagogiques": "pedagogical objectives",
+            "objectifs pédagogiques": "pedagogical objectives",
+            "parcours": "track",
+        }
+        mapped = _replace_terms(base, en_to_fr if lang == "en" else fr_to_en)
+        mapped = " ".join(mapped.split())
+        if mapped and mapped.lower() != base.lower():
+            variants.append(mapped)
+        return variants
+
+    def _extract_bm25_docs(query_text: str, k: int) -> list[Document]:
+        query_tokens = tokenizer.tokenize(query_text)
+        bm25_results, _ = bm25_index.retrieve(query_tokens, k=k)
+        indices = bm25_results[0] if getattr(bm25_results, "ndim", 1) == 2 else bm25_results
+        indices = indices.tolist() if hasattr(indices, "tolist") else list(indices)
+        docs = []
+        for idx in indices:
+            if 0 <= idx < len(corpus_docs):
+                docs.append(corpus_docs[idx])
+        return docs
+
+    def _weighted_rrf_fusion(ranked_lists: list[tuple[list[Document], float]], k: int = 60):
         scores = defaultdict(float)
         docs_by_content = {}
-        for rank, doc in enumerate(vector_docs, 1):
-            scores[doc.page_content] += 1 / (k + rank)
-            docs_by_content.setdefault(doc.page_content, doc)
-        for rank, doc in enumerate(bm25_docs, 1):
-            scores[doc.page_content] += 1 / (k + rank)
-            docs_by_content.setdefault(doc.page_content, doc)
+        for docs, weight in ranked_lists:
+            for rank, doc in enumerate(docs, 1):
+                scores[doc.page_content] += weight / (k + rank)
+                docs_by_content.setdefault(doc.page_content, doc)
         sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         return [(docs_by_content[text], score) for text, score in sorted_items]
+
+    def _intent_boost(question: str, doc: Document) -> float:
+        question_lower = question.lower()
+        content_lower = doc.page_content.lower()
+        chunk_type = str(doc.metadata.get("chunk_type", "")).lower()
+        boost = 0.0
+
+        asks_email = any(token in question_lower for token in ["email", "mail", "courriel", "adresse"])
+        asks_duration = any(token in question_lower for token in ["duration", "how long", "durée", "duree", "combien"])
+        asks_role = any(token in question_lower for token in ["responsible", "responsable", "contact", "who"])
+
+        if asks_email and re.search(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", doc.page_content):
+            boost += 0.35
+        if asks_duration and re.search(r"\b\d+\s*(month|months|mois|week|weeks|semaine|semaines|year|years|an|ans)\b", content_lower):
+            boost += 0.12
+        if asks_duration and any(token in content_lower for token in ["stage", "internship", "obligatoire", "mandatory"]):
+            boost += 0.08
+        if asks_role and any(token in content_lower for token in ["responsable", "responsible", "assistant", "contact"]):
+            boost += 0.08
+
+        # Soft penalty only: keep staff chunks available for role/contact questions.
+        if chunk_type == "staff" and not (asks_email or asks_role):
+            boost -= 0.04
+        return boost
+
+    def _dynamic_answer_top_k(reranked_scored: list[tuple[Document, float]]) -> int:
+        if not reranked_scored:
+            return 0
+        base_k = min(8, len(reranked_scored))
+        if len(reranked_scored) <= base_k:
+            return base_k
+        cutoff_score = reranked_scored[base_k - 1][1]
+        tail_scores = [score for _, score in reranked_scored[base_k: min(len(reranked_scored), base_k + 6)]]
+        close_count = sum(1 for score in tail_scores if (cutoff_score - score) <= 0.03)
+        return min(len(reranked_scored), base_k + close_count)
 
     def _score_stats_line(scores: list[float]) -> str:
         if not scores:
@@ -647,45 +756,44 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
                 print(f"[DEBUG][RETRIEVE][CACHE_HIT] q={question!r} docs={len(cached_docs)}")
             return cached_docs
 
-        # 1. Vector retrieval (MMR) with filter
-        vec_docs = base_retriever.invoke(question)
-
-        # 2. BM25 retrieval - dynamically adjust k
-        query_tokens = tokenizer.tokenize(question)
-        corpus_size = len(corpus)
+        # 1. Build query variants for multilingual robustness.
+        query_variants = _build_query_variants(question)
+        corpus_size = len(corpus_docs)
         bm25_k = min(30, corpus_size)
-        bm25_results, _ = bm25_index.retrieve(query_tokens, k=bm25_k)
 
-        # Handle both 1D and 2D result shapes
-        if bm25_results.ndim == 2:
-            indices = bm25_results[0]
-        else:
-            indices = bm25_results
+        ranked_lists: list[tuple[list[Document], float]] = []
+        for idx, q_variant in enumerate(query_variants):
+            variant_weight = 1.0 if idx == 0 else 0.85
+            vec_docs = base_retriever.invoke(q_variant)
+            bm25_docs = _extract_bm25_docs(q_variant, bm25_k)
+            ranked_lists.append((vec_docs, 1.25 * variant_weight))
+            ranked_lists.append((bm25_docs, 0.75 * variant_weight))
 
-        # Convert to list of ints
-        if hasattr(indices, 'tolist'):
-            indices = indices.tolist()
-        else:
-            indices = list(indices)
+        # 2. Weighted RRF fusion across all retrieval routes.
+        merged_scored = _weighted_rrf_fusion(ranked_lists, k=60)
 
-        # Build Document list from corpus
-        bm25_docs = [Document(page_content=corpus[idx]) for idx in indices]
-
-        # 3. RRF fusion
-        merged_scored = rrf_fusion(vec_docs, bm25_docs, k=60)
-
-        # 4. Take top 50 candidates (or fewer)
-        base_scored = merged_scored[:50] if len(merged_scored) > 50 else merged_scored
+        # 3. Keep top candidates before rerank.
+        base_scored = merged_scored[:60] if len(merged_scored) > 60 else merged_scored
         candidates = [doc for doc, _ in base_scored]
 
-        # 5. Rerank
+        # 4. Rerank and apply intent-based score adjustments.
         reranked_all_scored = rerank_documents(question, candidates, top_n=len(candidates), return_scores=True)
-        answer_top_k = 5
+        reranked_all_scored = [
+            (doc, score + _intent_boost(question, doc)) for doc, score in reranked_all_scored
+        ]
+        reranked_all_scored.sort(key=lambda x: x[1], reverse=True)
+
+        answer_top_k = _dynamic_answer_top_k(reranked_all_scored)
         reranked_for_answer = reranked_all_scored[:answer_top_k]
 
         if debug:
             print(f"[DEBUG][RETRIEVE] q={question!r} base_count={len(base_scored)} rerank_count={len(reranked_all_scored)}")
-            print(f"[DEBUG][RETRIEVE][PIPELINE] vec={len(vec_docs)} bm25={len(bm25_docs)} merged={len(merged_scored)} answer_top_k={answer_top_k}")
+            print(
+                f"[DEBUG][RETRIEVE][PIPELINE] variants={len(query_variants)} "
+                f"routes={len(ranked_lists)} merged={len(merged_scored)} answer_top_k={answer_top_k}"
+            )
+            for idx, q_variant in enumerate(query_variants, start=1):
+                print(f"[DEBUG][RETRIEVE][QUERY_VARIANT] {idx}={q_variant!r}")
 
             base_scores = [score for _, score in base_scored]
             rerank_scores = [score for _, score in reranked_all_scored]

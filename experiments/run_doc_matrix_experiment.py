@@ -436,8 +436,19 @@ def main() -> None:
             print(f"[DOC {doc_idx}/{len(docs)}] Skip: no aligned questions found", flush=True)
             continue
 
-        vectordb = prepare_data(doc_file=str(target_doc), url_file=None, debug=args.debug)
-        qa_chain, retriever, _ = chatbox(vectordb, debug=args.debug, return_prompt=True)
+        vectordb, bm25_index, tokenizer, corpus = prepare_data(
+            doc_file=str(target_doc),
+            url_file=None,
+            debug=args.debug,
+        )
+        qa_chain, retriever, _ = chatbox(
+            vectordb=vectordb,
+            bm25_index=bm25_index,
+            tokenizer=tokenizer,
+            corpus=corpus,
+            debug=args.debug,
+            return_prompt=True,
+        )
 
         for q_idx, q in enumerate(doc_questions, start=1):
             print(
