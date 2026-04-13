@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Environment setup requested by user.
-#module load conda
-#conda activate /home/bma/conda_envs/chatbox
+module load conda
+conda activate /home/bma/conda_envs/chatbox
 #conda init
 #conda activate chatbox
 #cd ChatBox_UniCA

@@ -706,30 +706,6 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
         sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         return [(docs_by_content[text], score) for text, score in sorted_items]
 
-    def _intent_boost(question: str, doc: Document) -> float:
-        question_lower = question.lower()
-        content_lower = doc.page_content.lower()
-        chunk_type = str(doc.metadata.get("chunk_type", "")).lower()
-        boost = 0.0
-
-        asks_email = any(token in question_lower for token in ["email", "mail", "courriel", "adresse"])
-        asks_duration = any(token in question_lower for token in ["duration", "how long", "durée", "duree", "combien"])
-        asks_role = any(token in question_lower for token in ["responsible", "responsable", "contact", "who"])
-
-        if asks_email and re.search(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", doc.page_content):
-            boost += 0.35
-        if asks_duration and re.search(r"\b\d+\s*(month|months|mois|week|weeks|semaine|semaines|year|years|an|ans)\b", content_lower):
-            boost += 0.12
-        if asks_duration and any(token in content_lower for token in ["stage", "internship", "obligatoire", "mandatory"]):
-            boost += 0.08
-        if asks_role and any(token in content_lower for token in ["responsable", "responsible", "assistant", "contact"]):
-            boost += 0.08
-
-        # Soft penalty only: keep staff chunks available for role/contact questions.
-        if chunk_type == "staff" and not (asks_email or asks_role):
-            boost -= 0.04
-        return boost
-
     def _dynamic_answer_top_k(reranked_scored: list[tuple[Document, float]]) -> int:
         if not reranked_scored:
             return 0
@@ -776,12 +752,8 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
         base_scored = merged_scored[:60] if len(merged_scored) > 60 else merged_scored
         candidates = [doc for doc, _ in base_scored]
 
-        # 4. Rerank and apply intent-based score adjustments.
+        # 4. Rerank candidates.
         reranked_all_scored = rerank_documents(question, candidates, top_n=len(candidates), return_scores=True)
-        reranked_all_scored = [
-            (doc, score + _intent_boost(question, doc)) for doc, score in reranked_all_scored
-        ]
-        reranked_all_scored.sort(key=lambda x: x[1], reverse=True)
 
         answer_top_k = _dynamic_answer_top_k(reranked_all_scored)
         reranked_for_answer = reranked_all_scored[:answer_top_k]
