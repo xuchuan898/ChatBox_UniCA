@@ -516,7 +516,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--rerank-alpha",
         type=float,
-        default=1.0,
+        default=0.5,
         help=(
             "Dual rerank fusion weight in [0,1]. "
             "final_score = alpha*src_query_score + (1-alpha)*translated_query_score."
@@ -610,7 +610,7 @@ def chatbox(
     weight_bm25: float = 0.75,
     secondary_variant_weight: float = 0.85,
     variant_mode: str = "mapped_current",
-    rerank_alpha: float = 1.0,
+    rerank_alpha: float = 0.5,
 ):
     # Deterministic LLM settings
     llm = ChatOllama(
