@@ -513,6 +513,15 @@ def parse_args() -> argparse.Namespace:
         default="mapped_current",
         help="Query variant generation mode used before hybrid retrieval.",
     )
+    parser.add_argument(
+        "--rerank-alpha",
+        type=float,
+        default=1.0,
+        help=(
+            "Dual rerank fusion weight in [0,1]. "
+            "final_score = alpha*src_query_score + (1-alpha)*translated_query_score."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -601,6 +610,7 @@ def chatbox(
     weight_bm25: float = 0.75,
     secondary_variant_weight: float = 0.85,
     variant_mode: str = "mapped_current",
+    rerank_alpha: float = 1.0,
 ):
     # Deterministic LLM settings
     llm = ChatOllama(
@@ -649,17 +659,92 @@ def chatbox(
         for item in corpus
     ]
 
+    if not 0.0 <= rerank_alpha <= 1.0:
+        raise ValueError(f"rerank_alpha must be in [0, 1], got: {rerank_alpha}")
+
+    en_to_fr_base = {
+        "work-study": "alternance",
+        "responsible": "responsable",
+        "email": "courriel",
+        "address": "adresse",
+        "internship": "stage",
+        "duration": "duree",
+        "compulsory": "obligatoire",
+        "mandatory": "obligatoire",
+        "pedagogical objectives": "objectifs pedagogiques",
+        "program": "parcours",
+        "track": "parcours",
+    }
+    fr_to_en_base = {
+        "alternance": "work-study",
+        "responsable": "responsible",
+        "courriel": "email",
+        "adresse": "address",
+        "stage": "internship",
+        "duree": "duration",
+        "durée": "duration",
+        "obligatoire": "mandatory",
+        "objectifs pedagogiques": "pedagogical objectives",
+        "objectifs pédagogiques": "pedagogical objectives",
+        "parcours": "track",
+    }
+    en_to_fr_expanded = {
+        **en_to_fr_base,
+        "semester": "semestre",
+        "elective": "au choix",
+        "credits": "ects",
+        "lecturer": "lecteur",
+        "teacher": "lecteur",
+        "schedule": "rythme",
+        "prerequisites": "prérequis",
+        "objectives": "objectifs",
+        "program": "programme",
+        "intern": "stage",
+    }
+    fr_to_en_expanded = {
+        **fr_to_en_base,
+        "semestre": "semester",
+        "au choix": "elective",
+        "credits": "ects",
+        "lecteur": "lecturer",
+        "rythme": "schedule",
+        "prérequis": "prerequisites",
+        "prerequis": "prerequisites",
+        "objectifs": "objectives",
+        "programme": "program",
+    }
+
+    def _translate_query_for_rerank(query: str) -> str:
+        lang = _detect_query_language(query)
+        mapping = en_to_fr_expanded if lang == "en" else fr_to_en_expanded
+        translated = _replace_terms(query, mapping)
+        translated = " ".join(translated.split())
+        return translated if translated else query
+
     def rerank_documents(query, documents, top_n=8, return_scores=False):
         if not documents:
             return [] if not return_scores else []
-        pairs = [(query, doc.page_content) for doc in documents]
-        scores = reranker.predict(pairs)
-        scored = [(doc, float(score)) for doc, score in zip(documents, scores)]
+
+        src_pairs = [(query, doc.page_content) for doc in documents]
+        src_scores = [float(score) for score in reranker.predict(src_pairs)]
+        translated_query = _translate_query_for_rerank(query)
+
+        if rerank_alpha < 1.0:
+            trans_pairs = [(translated_query, doc.page_content) for doc in documents]
+            trans_scores = [float(score) for score in reranker.predict(trans_pairs)]
+        else:
+            trans_scores = src_scores
+
+        scored = []
+        for doc, src_score, trans_score in zip(documents, src_scores, trans_scores):
+            fused_score = rerank_alpha * src_score + (1.0 - rerank_alpha) * trans_score
+            scored.append((doc, float(fused_score), float(src_score), float(trans_score)))
+
         scored.sort(key=lambda x: x[1], reverse=True)
         top_scored = scored[:top_n]
         if return_scores:
             return top_scored
-        return [doc for doc, _ in top_scored]
+        return [doc for doc, _, _, _ in top_scored]
 
     def _detect_query_language(text: str) -> str:
         lower = text.lower()
@@ -692,58 +777,7 @@ def chatbox(
             return variants
 
         lang = _detect_query_language(base)
-        en_to_fr = {
-            "work-study": "alternance",
-            "responsible": "responsable",
-            "email": "courriel",
-            "address": "adresse",
-            "internship": "stage",
-            "duration": "duree",
-            "compulsory": "obligatoire",
-            "mandatory": "obligatoire",
-            "pedagogical objectives": "objectifs pedagogiques",
-            "program": "parcours",
-            "track": "parcours",
-        }
-        fr_to_en = {
-            "alternance": "work-study",
-            "responsable": "responsible",
-            "courriel": "email",
-            "adresse": "address",
-            "stage": "internship",
-            "duree": "duration",
-            "durée": "duration",
-            "obligatoire": "mandatory",
-            "objectifs pedagogiques": "pedagogical objectives",
-            "objectifs pédagogiques": "pedagogical objectives",
-            "parcours": "track",
-        }
-        en_to_fr_expanded = {
-            **en_to_fr,
-            "semester": "semestre",
-            "elective": "au choix",
-            "credits": "ects",
-            "lecturer": "lecteur",
-            "teacher": "lecteur",
-            "schedule": "rythme",
-            "prerequisites": "prérequis",
-            "objectives": "objectifs",
-            "program": "programme",
-            "intern": "stage",
-        }
-        fr_to_en_expanded = {
-            **fr_to_en,
-            "semestre": "semester",
-            "au choix": "elective",
-            "credits": "ects",
-            "lecteur": "lecturer",
-            "rythme": "schedule",
-            "prérequis": "prerequisites",
-            "prerequis": "prerequisites",
-            "objectifs": "objectives",
-            "programme": "program",
-        }
-        mapping = en_to_fr if lang == "en" else fr_to_en
+        mapping = en_to_fr_base if lang == "en" else fr_to_en_base
         if variant_mode == "mapped_expanded":
             mapping = en_to_fr_expanded if lang == "en" else fr_to_en_expanded
 
@@ -823,19 +857,30 @@ def chatbox(
         candidates = [doc for doc, _ in base_scored]
 
         # 4. Rerank candidates.
-        reranked_all_scored = rerank_documents(question, candidates, top_n=len(candidates), return_scores=True)
+        reranked_all_scored_detailed = rerank_documents(
+            question,
+            candidates,
+            top_n=len(candidates),
+            return_scores=True,
+        )
+        reranked_all_scored = [(doc, score) for doc, score, _, _ in reranked_all_scored_detailed]
 
         answer_top_k = _dynamic_answer_top_k(reranked_all_scored)
         reranked_for_answer = reranked_all_scored[:answer_top_k]
 
         if debug:
+            translated_query = _translate_query_for_rerank(question)
+            print(
+                f"[DEBUG][RERANK_DUAL][QUERY] src={question!r} translated={translated_query!r} "
+                f"alpha={rerank_alpha:.3f}"
+            )
             print(f"[DEBUG][RETRIEVE] q={question!r} base_count={len(base_scored)} rerank_count={len(reranked_all_scored)}")
             print(
                 f"[DEBUG][RETRIEVE][PIPELINE] variants={len(query_variants)} "
                 f"routes={len(ranked_lists)} merged={len(merged_scored)} answer_top_k={answer_top_k} "
                 f"weight_vec={weight_vec:.3f} weight_bm25={weight_bm25:.3f} "
                 f"secondary_variant_weight={secondary_variant_weight:.3f} "
-                f"variant_mode={variant_mode}"
+                f"variant_mode={variant_mode} rerank_alpha={rerank_alpha:.3f}"
             )
             for idx, q_variant in enumerate(query_variants, start=1):
                 print(f"[DEBUG][RETRIEVE][QUERY_VARIANT] {idx}={q_variant!r}")
@@ -852,6 +897,11 @@ def chatbox(
             for idx, (doc, score) in enumerate(reranked_all_scored, 1):
                 source = _short_source(doc)
                 print(f"[DEBUG][RETRIEVE][RERANK_TOP] rank={idx} score={score:.4f} source={source}")
+            for idx, (_, _, src_score, trans_score) in enumerate(reranked_all_scored_detailed, 1):
+                print(
+                    f"[DEBUG][RETRIEVE][RERANK_TOP_COMPONENT] rank={idx} "
+                    f"src_score={src_score:.4f} trans_score={trans_score:.4f}"
+                )
 
             _print_retrieval_markdown(question, base_scored, reranked_all_scored)
 
@@ -911,6 +961,7 @@ def main() -> None:
         weight_bm25=args.weight_bm25,
         secondary_variant_weight=args.secondary_variant_weight,
         variant_mode=args.variant_mode,
+        rerank_alpha=args.rerank_alpha,
     )
 
     if args.question_file:
