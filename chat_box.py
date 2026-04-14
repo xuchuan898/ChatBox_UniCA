@@ -488,6 +488,31 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="If set, save all generated chunks to this file (JSONL)",
     )
+    parser.add_argument(
+        "--weight-vec",
+        type=float,
+        default=1.25,
+        help="Vector retrieval path weight used in weighted RRF fusion.",
+    )
+    parser.add_argument(
+        "--weight-bm25",
+        type=float,
+        default=0.75,
+        help="BM25 retrieval path weight used in weighted RRF fusion.",
+    )
+    parser.add_argument(
+        "--secondary-variant-weight",
+        type=float,
+        default=0.85,
+        help="Weight multiplier for non-primary query variants.",
+    )
+    parser.add_argument(
+        "--variant-mode",
+        type=str,
+        choices=["primary_only", "mapped_current", "mapped_expanded"],
+        default="mapped_current",
+        help="Query variant generation mode used before hybrid retrieval.",
+    )
     return parser.parse_args()
 
 
@@ -565,7 +590,18 @@ def _print_retrieval_markdown(question: str, base_scored: list[tuple[Document, f
     print("[DEBUG][RETRIEVE_MD_END]")
 
 
-def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return_prompt: bool = False):
+def chatbox(
+    vectordb,
+    bm25_index,
+    tokenizer,
+    corpus,
+    debug: bool = False,
+    return_prompt: bool = False,
+    weight_vec: float = 1.25,
+    weight_bm25: float = 0.75,
+    secondary_variant_weight: float = 0.85,
+    variant_mode: str = "mapped_current",
+):
     # Deterministic LLM settings
     llm = ChatOllama(
         model="gemma3:1b",
@@ -652,6 +688,9 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
     def _build_query_variants(question: str) -> list[str]:
         base = " ".join(question.split())
         variants = [base]
+        if variant_mode == "primary_only":
+            return variants
+
         lang = _detect_query_language(base)
         en_to_fr = {
             "work-study": "alternance",
@@ -679,10 +718,41 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
             "objectifs pédagogiques": "pedagogical objectives",
             "parcours": "track",
         }
-        mapped = _replace_terms(base, en_to_fr if lang == "en" else fr_to_en)
+        en_to_fr_expanded = {
+            **en_to_fr,
+            "semester": "semestre",
+            "elective": "au choix",
+            "credits": "ects",
+            "lecturer": "lecteur",
+            "teacher": "lecteur",
+            "schedule": "rythme",
+            "prerequisites": "prérequis",
+            "objectives": "objectifs",
+            "program": "programme",
+            "intern": "stage",
+        }
+        fr_to_en_expanded = {
+            **fr_to_en,
+            "semestre": "semester",
+            "au choix": "elective",
+            "credits": "ects",
+            "lecteur": "lecturer",
+            "rythme": "schedule",
+            "prérequis": "prerequisites",
+            "prerequis": "prerequisites",
+            "objectifs": "objectives",
+            "programme": "program",
+        }
+        mapping = en_to_fr if lang == "en" else fr_to_en
+        if variant_mode == "mapped_expanded":
+            mapping = en_to_fr_expanded if lang == "en" else fr_to_en_expanded
+
+        mapped = _replace_terms(base, mapping)
         mapped = " ".join(mapped.split())
         if mapped and mapped.lower() != base.lower():
             variants.append(mapped)
+        # De-duplicate while preserving order.
+        variants = list(dict.fromkeys(variants))
         return variants
 
     def _extract_bm25_docs(query_text: str, k: int) -> list[Document]:
@@ -739,11 +809,11 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
 
         ranked_lists: list[tuple[list[Document], float]] = []
         for idx, q_variant in enumerate(query_variants):
-            variant_weight = 1.0 if idx == 0 else 0.85
+            variant_weight = 1.0 if idx == 0 else secondary_variant_weight
             vec_docs = base_retriever.invoke(q_variant)
             bm25_docs = _extract_bm25_docs(q_variant, bm25_k)
-            ranked_lists.append((vec_docs, 1.25 * variant_weight))
-            ranked_lists.append((bm25_docs, 0.75 * variant_weight))
+            ranked_lists.append((vec_docs, weight_vec * variant_weight))
+            ranked_lists.append((bm25_docs, weight_bm25 * variant_weight))
 
         # 2. Weighted RRF fusion across all retrieval routes.
         merged_scored = _weighted_rrf_fusion(ranked_lists, k=60)
@@ -762,7 +832,10 @@ def chatbox(vectordb, bm25_index, tokenizer, corpus, debug: bool = False, return
             print(f"[DEBUG][RETRIEVE] q={question!r} base_count={len(base_scored)} rerank_count={len(reranked_all_scored)}")
             print(
                 f"[DEBUG][RETRIEVE][PIPELINE] variants={len(query_variants)} "
-                f"routes={len(ranked_lists)} merged={len(merged_scored)} answer_top_k={answer_top_k}"
+                f"routes={len(ranked_lists)} merged={len(merged_scored)} answer_top_k={answer_top_k} "
+                f"weight_vec={weight_vec:.3f} weight_bm25={weight_bm25:.3f} "
+                f"secondary_variant_weight={secondary_variant_weight:.3f} "
+                f"variant_mode={variant_mode}"
             )
             for idx, q_variant in enumerate(query_variants, start=1):
                 print(f"[DEBUG][RETRIEVE][QUERY_VARIANT] {idx}={q_variant!r}")
@@ -834,6 +907,10 @@ def main() -> None:
         tokenizer=tokenizer,
         corpus=corpus,
         debug=args.debug,
+        weight_vec=args.weight_vec,
+        weight_bm25=args.weight_bm25,
+        secondary_variant_weight=args.secondary_variant_weight,
+        variant_mode=args.variant_mode,
     )
 
     if args.question_file:
