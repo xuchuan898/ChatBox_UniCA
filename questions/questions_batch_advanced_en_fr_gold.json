@@ -1,0 +1,230 @@
+{
+  "source_question_file": "questions/questions_batch_advanced_en_fr.txt",
+  "doc_file": "docs/chroma/master.md",
+  "items": [
+    {
+      "qid": 1,
+      "lang": "en",
+      "question": "I need the official contact for M2 leadership: who is responsible for M2 and what is the exact email?",
+      "expected_answer": "Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr).",
+      "gold_chunk": "PARCOURS IA > Responsable de master:"
+    },
+    {
+      "qid": 1,
+      "lang": "fr",
+      "question": "J'ai besoin du contact officiel pour la direction du M2 : qui est responsable du M2 et quel est l'e-mail exact ?",
+      "expected_answer": "Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr).",
+      "gold_chunk": "PARCOURS IA > Responsable de master:"
+    },
+    {
+      "qid": 2,
+      "lang": "en",
+      "question": "For administrative support, who is listed as Assistant in the program team, with email?",
+      "expected_answer": "Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr).",
+      "gold_chunk": "PARCOURS IA > Responsable de master:"
+    },
+    {
+      "qid": 2,
+      "lang": "fr",
+      "question": "Pour le support administratif, qui est indique comme Assistant dans l'equipe du master, avec l'e-mail ?",
+      "expected_answer": "Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr).",
+      "gold_chunk": "PARCOURS IA > Responsable de master:"
+    },
+    {
+      "qid": 3,
+      "lang": "en",
+      "question": "In Semester 1, which course is taught jointly by Leturc and Regin, and how many ECTS is it worth?",
+      "expected_answer": "UE Software Engineering Software engineering and Design patterns (EN), 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 1 > UE Software Engineering Software engineering and Design patterns (EN) - 3 ECTS"
+    },
+    {
+      "qid": 3,
+      "lang": "fr",
+      "question": "En Semestre 1, quelle UE est co-enseignee par Leturc et Regin, et combien d'ECTS vaut-elle ?",
+      "expected_answer": "UE Software Engineering Software engineering and Design patterns (EN), 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 1 > UE Software Engineering Software engineering and Design patterns (EN) - 3 ECTS"
+    },
+    {
+      "qid": 4,
+      "lang": "en",
+      "question": "Which Semester 1 course explicitly provides the link https://upinfo.univ-cotedazur.fr/s1/AI-models/?",
+      "expected_answer": "UE AI: Models and Applications (EN).",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 1 > UE AI: Models and Applications (EN) - 3 ECTS"
+    },
+    {
+      "qid": 4,
+      "lang": "fr",
+      "question": "Quelle UE du Semestre 1 contient explicitement le lien https://upinfo.univ-cotedazur.fr/s1/AI-models/ ?",
+      "expected_answer": "UE AI: Models and Applications (EN).",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 1 > UE AI: Models and Applications (EN) - 3 ECTS"
+    },
+    {
+      "qid": 5,
+      "lang": "en",
+      "question": "In Semester 2, which course covers both text classification and sentiment analysis in its description?",
+      "expected_answer": "UE Natural Language Processing (EN).",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > UE Natural Language Processing (EN) - 3 ECTS"
+    },
+    {
+      "qid": 5,
+      "lang": "fr",
+      "question": "En Semestre 2, quelle UE mentionne a la fois la classification de texte et l'analyse de sentiments dans sa description ?",
+      "expected_answer": "UE Natural Language Processing (EN).",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > UE Natural Language Processing (EN) - 3 ECTS"
+    },
+    {
+      "qid": 6,
+      "lang": "en",
+      "question": "Which Semester 2 course description explicitly mentions decision diagrams and Markov models?",
+      "expected_answer": "UE Combinatorial Optimization (EN).",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > UE Combinatorial Optimization (EN) - 3 ECTS"
+    },
+    {
+      "qid": 6,
+      "lang": "fr",
+      "question": "Quelle UE du Semestre 2 mentionne explicitement les diagrammes de decision et les modeles de Markov ?",
+      "expected_answer": "UE Combinatorial Optimization (EN).",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > UE Combinatorial Optimization (EN) - 3 ECTS"
+    },
+    {
+      "qid": 7,
+      "lang": "en",
+      "question": "In Semester 2, which course is taught by M. Malapert and focuses on linear programming plus constraint programming?",
+      "expected_answer": "UE Modélisation par des contraintes - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > UE Modélisation par des contraintes - 3 ECTS"
+    },
+    {
+      "qid": 7,
+      "lang": "fr",
+      "question": "En Semestre 2, quelle UE est enseignee par M. Malapert et porte sur la programmation lineaire et la programmation par contraintes ?",
+      "expected_answer": "UE Modélisation par des contraintes - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > UE Modélisation par des contraintes - 3 ECTS"
+    },
+    {
+      "qid": 8,
+      "lang": "en",
+      "question": "Which Semester 2 elective is taught by M. Lozes and is about distributed data processing for statistical analysis?",
+      "expected_answer": "Scalable Data Science (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > Scalable Data Science (EN) - 3 ECTS"
+    },
+    {
+      "qid": 8,
+      "lang": "fr",
+      "question": "Quelle UE au choix de Semestre 2 est enseignee par M. Lozes et traite du traitement distribue des donnees pour l'analyse statistique ?",
+      "expected_answer": "Scalable Data Science (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > Scalable Data Science (EN) - 3 ECTS"
+    },
+    {
+      "qid": 9,
+      "lang": "en",
+      "question": "Which Semester 2 elective is taught by Mme. Di Giusto and discusses formalisms like Petri nets and communicating/timed automata?",
+      "expected_answer": "Modelling Distributed Systems (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > Modelling Distributed Systems (EN) - 3 ECTS"
+    },
+    {
+      "qid": 9,
+      "lang": "fr",
+      "question": "Quelle UE au choix de Semestre 2 est enseignee par Mme. Di Giusto et discute des formalismes comme les reseaux de Petri et les automates communicants/temporises ?",
+      "expected_answer": "Modelling Distributed Systems (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > Modelling Distributed Systems (EN) - 3 ECTS"
+    },
+    {
+      "qid": 10,
+      "lang": "en",
+      "question": "Which Semester 2 elective is taught by E. Formenti and centers on computational complexity with Turing machines as reference?",
+      "expected_answer": "Computational Complexity (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > Computational Complexity (EN) - 3 ECTS"
+    },
+    {
+      "qid": 10,
+      "lang": "fr",
+      "question": "Quelle UE au choix de Semestre 2 est enseignee par E. Formenti et porte sur la complexite computationnelle avec les machines de Turing comme reference ?",
+      "expected_answer": "Computational Complexity (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > Computational Complexity (EN) - 3 ECTS"
+    },
+    {
+      "qid": 11,
+      "lang": "en",
+      "question": "In Semester 2, which elective is taught by M. Buffa and is about 3D game programming on the web?",
+      "expected_answer": "3D Game Programming in Real Time on the Web (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > 3D Game Programming in Real Time on the Web (EN) - 3 ECTS"
+    },
+    {
+      "qid": 11,
+      "lang": "fr",
+      "question": "En Semestre 2, quelle UE au choix est enseignee par M. Buffa et porte sur la programmation de jeux 3D sur le Web ?",
+      "expected_answer": "3D Game Programming in Real Time on the Web (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 2 > 3D Game Programming in Real Time on the Web (EN) - 3 ECTS"
+    },
+    {
+      "qid": 12,
+      "lang": "en",
+      "question": "Which Semester 1 course is taught by M. Crespelle and focuses on graph optimization topics such as shortest paths and max-flow/min-cut?",
+      "expected_answer": "Advanced Algorithms (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 1 > Advanced Algorithms (EN) - 3 ECTS"
+    },
+    {
+      "qid": 12,
+      "lang": "fr",
+      "question": "Quelle UE du Semestre 1 est enseignee par M. Crespelle et traite de sujets d'optimisation sur graphes comme plus courts chemins et flot max/coupe min ?",
+      "expected_answer": "Advanced Algorithms (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 1 > Advanced Algorithms (EN) - 3 ECTS"
+    },
+    {
+      "qid": 13,
+      "lang": "en",
+      "question": "Which Semester 1 course states that students will solve puzzles from ACM-style programming contests?",
+      "expected_answer": "Programming Challenge (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 1 > Programming Challenge (EN) - 3 ECTS"
+    },
+    {
+      "qid": 13,
+      "lang": "fr",
+      "question": "Quelle UE du Semestre 1 indique que les etudiants travailleront sur des enigmes issues de concours de programmation type ACM ?",
+      "expected_answer": "Programming Challenge (EN) - 3 ECTS.",
+      "gold_chunk": "Cours Programme 2026/2027 > Semestre 1 > Programming Challenge (EN) - 3 ECTS"
+    },
+    {
+      "qid": 14,
+      "lang": "en",
+      "question": "In the pedagogy section, which three practical learning formats are explicitly listed?",
+      "expected_answer": "Projets encadrés, études de cas, travaux de groupe.",
+      "gold_chunk": "PARCOURS IA > Pédagogie"
+    },
+    {
+      "qid": 14,
+      "lang": "fr",
+      "question": "Dans la section pedagogie, quels sont les trois formats d'apprentissage pratique explicitement cites ?",
+      "expected_answer": "Projets encadrés, études de cas, travaux de groupe.",
+      "gold_chunk": "PARCOURS IA > Pédagogie"
+    },
+    {
+      "qid": 15,
+      "lang": "en",
+      "question": "In the outcomes section, which sectors are explicitly listed for graduate employment?",
+      "expected_answer": "Numérique, industrie, services, aide à la décision, recherche et innovation.",
+      "gold_chunk": "PARCOURS IA > Débouchées"
+    },
+    {
+      "qid": 15,
+      "lang": "fr",
+      "question": "Dans la section debouches, quels secteurs d'emploi sont explicitement listes pour les diplomes ?",
+      "expected_answer": "Numérique, industrie, services, aide à la décision, recherche et innovation.",
+      "gold_chunk": "PARCOURS IA > Débouchées"
+    },
+    {
+      "qid": 16,
+      "lang": "en",
+      "question": "What is the document creation date shown at the top of the file?",
+      "expected_answer": "11 mars 2026.",
+      "gold_chunk": "MASTER IA Information (header)"
+    },
+    {
+      "qid": 16,
+      "lang": "fr",
+      "question": "Quelle est la date de creation affichee en haut du document ?",
+      "expected_answer": "11 mars 2026.",
+      "gold_chunk": "MASTER IA Information (header)"
+    }
+  ]
+}

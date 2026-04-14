@@ -25,8 +25,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--question-file",
         type=Path,
-        default=Path("questions/questions_batch_example.txt"),
+        default=Path("questions/questions_batch_advanced_en_fr.txt"),
         help="Batch question file path (relative to project root if not absolute).",
+    )
+    parser.add_argument(
+        "--gold-file",
+        type=Path,
+        default=Path("questions/questions_batch_advanced_en_fr_gold.json"),
+        help="Gold file with expected answers and gold chunks for retrieval evaluation.",
     )
     parser.add_argument(
         "--docs",
@@ -373,6 +379,93 @@ def parse_answers(answer_file: Path) -> list[dict]:
     return rows
 
 
+def load_gold_map(path: Path | None) -> dict:
+    if not path or not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mapping = {}
+    for item in payload.get("items", []):
+        question = str(item.get("question", "")).strip()
+        if not question:
+            continue
+        mapping[question] = {
+            "expected_answer": item.get("expected_answer", ""),
+            "gold_chunk": item.get("gold_chunk", ""),
+            "lang": item.get("lang", ""),
+            "qid": item.get("qid", ""),
+        }
+    return mapping
+
+
+def _normalize_for_match(text: str) -> str:
+    lowered = text.lower()
+    lowered = re.sub(r"[^a-z0-9àâçéèêëîïôûùüÿœ\s]", " ", lowered)
+    lowered = re.sub(r"\s+", " ", lowered).strip()
+    return lowered
+
+
+def _gold_terms(gold_chunk: str) -> list[str]:
+    if not gold_chunk:
+        return []
+    parts = [p.strip() for p in gold_chunk.split(">") if p.strip()]
+    if not parts:
+        return []
+    candidates = [parts[-1]]
+    if len(parts) >= 2:
+        candidates.append(parts[-2])
+    terms = []
+    for c in candidates:
+        norm = _normalize_for_match(c)
+        if norm and len(norm) >= 4:
+            terms.append(norm)
+    return terms
+
+
+def preview_matches_gold(preview: str, gold_chunk: str) -> bool:
+    if not preview or not gold_chunk:
+        return False
+    p = _normalize_for_match(preview)
+    terms = _gold_terms(gold_chunk)
+    if not terms:
+        return False
+    return any(term in p for term in terms)
+
+
+def parse_rerank_rows_from_block(block: str, top_k: int = 5) -> dict:
+    question = ""
+    section = ""
+    rerank_rows = []
+    for raw_line in block.splitlines():
+        line = raw_line.rstrip()
+        q_match = re.match(r"^- Question:\s*`(.*)`\s*$", line)
+        if q_match:
+            question = q_match.group(1).strip()
+            continue
+        if line.startswith("#### Rerank Result"):
+            section = "rerank"
+            continue
+        if not line.startswith("|") or line.startswith("| ---"):
+            continue
+        cells = [part.strip() for part in line.split("|")]
+        if cells and cells[0] == "":
+            cells = cells[1:]
+        if cells and cells[-1] == "":
+            cells = cells[:-1]
+        if not cells or cells[0].lower() == "rank":
+            continue
+        if section == "rerank" and len(cells) >= 6:
+            rerank_rows.append(
+                {
+                    "rank": int(cells[0]),
+                    "score": float(cells[1]),
+                    "source": cells[2],
+                    "chunk_type": cells[4],
+                    "preview": cells[5],
+                }
+            )
+    return {"question": question, "rerank_rows": rerank_rows[:top_k]}
+
+
 def write_summary_md(run_dir: Path, question_file: Path, runs: list[dict]) -> None:
     summary_path = run_dir / "summary.md"
     lines = []
@@ -399,6 +492,10 @@ def write_summary_md(run_dir: Path, question_file: Path, runs: list[dict]) -> No
         lines.append("")
         if run["error_hint"]:
             lines.append(f"- Error hint: {run['error_hint']}")
+        if run.get("retrieval_hit_at_1") is not None:
+            lines.append(f"- Retrieval Hit@1 (gold): {run['retrieval_hit_at_1']:.3f}")
+        if run.get("retrieval_hit_at_5") is not None:
+            lines.append(f"- Retrieval Hit@5 (gold): {run['retrieval_hit_at_5']:.3f}")
         if run["loaded_line"]:
             lines.append(f"- {run['loaded_line']}")
         if run["chunks_line"]:
@@ -439,6 +536,7 @@ def write_summary_md(run_dir: Path, question_file: Path, runs: list[dict]) -> No
     lines.append("")
     lines.append("- Use `comparison.csv` for side-by-side answer review.")
     lines.append("- Use raw logs to inspect retrieval details and failure points.")
+    lines.append("- Use `retrieval_eval.md` and `retrieval_eval.csv` for retrieval-focused evaluation (Hit@1/Hit@5).")
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -463,6 +561,80 @@ def write_comparison_csv(run_dir: Path, runs: list[dict]) -> None:
             for tag in tags:
                 row.setdefault(f"answer__{tag}", "")
             writer.writerow(row)
+
+
+def write_retrieval_eval_csv(run_dir: Path, runs: list[dict]) -> None:
+    rows = []
+    for run in runs:
+        for item in run.get("retrieval_eval", []):
+            rows.append(
+                {
+                    "tag": run["tag"],
+                    "doc_path": run["doc_path"],
+                    **item,
+                }
+            )
+
+    output_path = run_dir / "retrieval_eval.csv"
+    fieldnames = [
+        "tag",
+        "doc_path",
+        "q_id",
+        "question",
+        "gold_chunk",
+        "expected_answer",
+        "hit_at_1",
+        "hit_at_5",
+        "top1_score",
+        "top1_preview",
+    ]
+    with output_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def write_retrieval_eval_md(run_dir: Path, runs: list[dict]) -> None:
+    lines = [
+        "# Retrieval Evaluation",
+        "",
+        f"- Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "- Metric: Top-5 rerank preview matched against provided gold chunk.",
+        "",
+        "## Per-Run Metrics",
+        "",
+        "| Tag | Hit@1 | Hit@5 | Questions Evaluated |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for run in runs:
+        evaluated = len(run.get("retrieval_eval", []))
+        h1 = run.get("retrieval_hit_at_1")
+        h5 = run.get("retrieval_hit_at_5")
+        lines.append(
+            f"| {run['tag']} | "
+            f"{(f'{h1:.3f}' if h1 is not None else 'n/a')} | "
+            f"{(f'{h5:.3f}' if h5 is not None else 'n/a')} | "
+            f"{evaluated} |"
+        )
+
+    lines.extend(["", "## Per-Question Top1 View", ""])
+    for run in runs:
+        lines.append(f"### {run['tag']}")
+        lines.append("")
+        lines.append("| Q | Hit@1 | Top1 Score | Top1 Preview |")
+        lines.append("| ---: | :---: | ---: | --- |")
+        for item in run.get("retrieval_eval", []):
+            score = item.get("top1_score")
+            lines.append(
+                f"| {item.get('q_id', '')} | "
+                f"{'✅' if item.get('hit_at_1') == 1 else '❌'} | "
+                f"{(f'{score:.4f}' if score is not None else '')} | "
+                f"{item.get('top1_preview', '')} |"
+            )
+        lines.append("")
+
+    (run_dir / "retrieval_eval.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def write_retrieval_trace_md(run_dir: Path, runs: list[dict]) -> None:
@@ -636,12 +808,14 @@ def main() -> None:
     args = parse_args()
     project_root = args.project_root.resolve()
     question_file = resolve_path(project_root, args.question_file).resolve()
+    gold_file = resolve_path(project_root, args.gold_file).resolve()
     docs = [resolve_path(project_root, d).resolve() for d in args.docs]
     output_base = resolve_path(project_root, args.output_dir).resolve()
     ollama_info = ensure_ollama(args)
 
     if not question_file.exists():
         raise FileNotFoundError(f"Question file not found: {question_file}")
+    gold_map = load_gold_map(gold_file if gold_file.exists() else None)
     if not docs:
         raise ValueError("No doc files provided.")
 
@@ -654,6 +828,8 @@ def main() -> None:
     answers_dir.mkdir(parents=True, exist_ok=True)
     print(f"[INFO] Project root: {project_root}", flush=True)
     print(f"[INFO] Question file: {question_file}", flush=True)
+    print(f"[INFO] Gold file: {gold_file if gold_file.exists() else '[missing]'}", flush=True)
+    print(f"[INFO] Gold entries loaded: {len(gold_map)}", flush=True)
     print(f"[INFO] Output dir: {run_dir}", flush=True)
     print(f"[INFO] Total docs to test: {len(docs)}", flush=True)
     print(f"[INFO] PATH prepended with: {args.ollama_bin_dir.expanduser()}", flush=True)
@@ -704,6 +880,9 @@ def main() -> None:
                 "answers": [],
                 "chunk_summary": "",
                 "error_hint": "",
+                "retrieval_eval": [],
+                "retrieval_hit_at_1": None,
+                "retrieval_hit_at_5": None,
             })
             continue
 
@@ -771,6 +950,37 @@ def main() -> None:
         else:
             chunk_summary = "[No chunk file generated]"
 
+        answers = parse_answers(answer_path)
+        retrieval_md_blocks = extract_retrieval_markdown_blocks(log_text)
+        parsed_rerank_blocks = [parse_rerank_rows_from_block(block, top_k=5) for block in retrieval_md_blocks]
+        retrieval_eval_rows = []
+        for q_idx, answer_item in enumerate(answers):
+            question = answer_item.get("question", "")
+            gold = gold_map.get(question, {})
+            gold_chunk = str(gold.get("gold_chunk", ""))
+            expected_answer = str(gold.get("expected_answer", ""))
+            rerank_rows = parsed_rerank_blocks[q_idx]["rerank_rows"] if q_idx < len(parsed_rerank_blocks) else []
+            top1 = rerank_rows[0] if rerank_rows else None
+            hit_at_1 = 1 if (top1 and preview_matches_gold(top1["preview"], gold_chunk)) else 0
+            hit_at_5 = 1 if any(preview_matches_gold(row["preview"], gold_chunk) for row in rerank_rows) else 0
+            retrieval_eval_rows.append(
+                {
+                    "q_id": answer_item.get("q_id", q_idx + 1),
+                    "question": question,
+                    "gold_chunk": gold_chunk,
+                    "expected_answer": expected_answer,
+                    "hit_at_1": hit_at_1,
+                    "hit_at_5": hit_at_5,
+                    "top1_score": top1.get("score") if top1 else None,
+                    "top1_preview": top1.get("preview", "") if top1 else "",
+                }
+            )
+        retrieval_hit_at_1 = None
+        retrieval_hit_at_5 = None
+        if retrieval_eval_rows:
+            retrieval_hit_at_1 = sum(item["hit_at_1"] for item in retrieval_eval_rows) / len(retrieval_eval_rows)
+            retrieval_hit_at_5 = sum(item["hit_at_5"] for item in retrieval_eval_rows) / len(retrieval_eval_rows)
+
         runs.append({
             "tag": tag,
             "exit_code": proc.returncode,
@@ -790,18 +1000,23 @@ def main() -> None:
             "retrieval_rerank_stats": extract_all_metric_lines(log_text, r"^\[DEBUG\]\[RETRIEVE\]\[RERANK_STATS\] .*$"),
             "retrieval_base_top": extract_all_metric_lines(log_text, r"^\[DEBUG\]\[RETRIEVE\]\[BASE_TOP\] .*$"),
             "retrieval_rerank_top": extract_all_metric_lines(log_text, r"^\[DEBUG\]\[RETRIEVE\]\[RERANK_TOP\] .*$"),
-            "retrieval_md_blocks": extract_retrieval_markdown_blocks(log_text),
+            "retrieval_md_blocks": retrieval_md_blocks,
             "prompt_md_blocks": extract_prompt_markdown_blocks(log_text),
             "retrieval_events": extract_retrieval_events(log_text),
-            "answers": parse_answers(answer_path),
+            "answers": answers,
             "chunk_summary": chunk_summary,
             "error_hint": error_hint,
+            "retrieval_eval": retrieval_eval_rows,
+            "retrieval_hit_at_1": retrieval_hit_at_1,
+            "retrieval_hit_at_5": retrieval_hit_at_5,
         })
 
     write_summary_md(run_dir, question_file, runs)
     write_comparison_csv(run_dir, runs)
     write_retrieval_trace_md(run_dir, runs)
     write_retrieval_full_md(run_dir, runs)
+    write_retrieval_eval_csv(run_dir, runs)
+    write_retrieval_eval_md(run_dir, runs)
     (run_dir / "summary.json").write_text(json.dumps(runs, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print("[INFO] Experiment done.", flush=True)
@@ -810,6 +1025,8 @@ def main() -> None:
     print(f"[INFO] Comparison CSV: {run_dir / 'comparison.csv'}", flush=True)
     print(f"[INFO] Retrieval Trace: {run_dir / 'retrieval_trace.md'}", flush=True)
     print(f"[INFO] Retrieval Full: {run_dir / 'retrieval_full.md'}", flush=True)
+    print(f"[INFO] Retrieval Eval CSV: {run_dir / 'retrieval_eval.csv'}", flush=True)
+    print(f"[INFO] Retrieval Eval MD: {run_dir / 'retrieval_eval.md'}", flush=True)
 
 
 if __name__ == "__main__":
