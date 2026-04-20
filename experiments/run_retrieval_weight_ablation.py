@@ -110,9 +110,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dynamic-topk-ratio",
-        type=float,
-        default=0.90,
-        help="Dynamic top-k ratio. Keep candidates with score >= ratio * max_score (0 < ratio <= 1).",
+        type=str,
+        default="0.5,0.6,0.7,0.8,0.9",
+        help=(
+            "Comma-separated dynamic top-k ratios. "
+            "For each ratio r, keep candidates with score >= r * max_score."
+        ),
     )
     parser.add_argument(
         "--top-k",
@@ -175,6 +178,22 @@ def parse_eval_topks(value: str) -> list[int]:
     unique_sorted = sorted(set(topks))
     if not unique_sorted:
         raise ValueError("No valid top-k values provided.")
+    return unique_sorted
+
+
+def parse_dynamic_topk_ratios(value: str) -> list[float]:
+    ratios = []
+    for token in (value or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        ratio = float(token)
+        if not (0.0 < ratio <= 1.0):
+            raise ValueError(f"Invalid dynamic top-k ratio: {ratio}. Must be in (0, 1].")
+        ratios.append(round(ratio, 4))
+    unique_sorted = sorted(set(ratios))
+    if not unique_sorted:
+        raise ValueError("No valid dynamic top-k ratios provided.")
     return unique_sorted
 
 
@@ -639,7 +658,7 @@ def build_markdown_summary(
     question_rows: list[dict],
     top_k: int,
     eval_topks: list[int],
-    dynamic_topk_ratio: float,
+    dynamic_topk_ratios: list[float],
 ) -> None:
     lines = [
         "# Retrieval Interaction Ablation Summary",
@@ -650,7 +669,7 @@ def build_markdown_summary(
         f"- Total runs: {len(run_summaries)}",
         f"- Questions per run: {len({r['q_id'] for r in question_rows}) if question_rows else 0}",
         f"- Evaluation top-k: {eval_topks}",
-        f"- Dynamic top-k ratio: {dynamic_topk_ratio:.2f}",
+        f"- Dynamic top-k ratios: [{', '.join(f'{r:.2f}' for r in dynamic_topk_ratios)}]",
         "",
         "## Run Configs",
         "",
@@ -684,6 +703,8 @@ def build_markdown_summary(
 
     lines.extend(
         [
+            "",
+            f"- Run Summary table uses legacy DynamicK fields at first ratio r={dynamic_topk_ratios[0]:.2f}.",
             "",
             "## Artifacts",
             "",
@@ -850,9 +871,8 @@ def main() -> None:
     gold_chunks_file = resolve_path(project_root, args.gold_chunks_file).resolve() if args.gold_chunks_file else None
     eval_topks = parse_eval_topks(args.eval_topk)
     max_eval_k = max(eval_topks)
-    dynamic_topk_ratio = float(args.dynamic_topk_ratio)
-    if not (0.0 < dynamic_topk_ratio <= 1.0):
-        raise ValueError(f"--dynamic-topk-ratio must be in (0, 1], got: {dynamic_topk_ratio}")
+    dynamic_topk_ratios = parse_dynamic_topk_ratios(args.dynamic_topk_ratio)
+    dynamic_topk_ratio = dynamic_topk_ratios[0]
     output_base = resolve_path(project_root, args.output_dir).resolve()
     chat_box_path = project_root / "chat_box.py"
 
@@ -895,7 +915,7 @@ def main() -> None:
     else:
         print(f"[INFO] Gold chunks file: [auto] {default_gold_chunks_file}", flush=True)
     print(f"[INFO] Evaluation top-k: {eval_topks}", flush=True)
-    print(f"[INFO] Dynamic top-k ratio: {dynamic_topk_ratio:.2f}", flush=True)
+    print(f"[INFO] Dynamic top-k ratios: {[round(r, 2) for r in dynamic_topk_ratios]}", flush=True)
     print(
         f"[INFO] Fixed non-target values: bm25_ratio={args.fixed_bm25_ratio:.2f}, "
         f"translation_ratio={args.fixed_translation_ratio:.2f}, rerank_alpha={args.fixed_rerank_alpha:.2f}",
@@ -999,8 +1019,7 @@ def main() -> None:
             eval_rows = rerank_rows[:max_eval_k]
             hit_map = {k: 0 for k in eval_topks}
             top1_matched_chunk_ids = []
-            dynamic_k = 0
-            dynamic_hit = 0
+            dynamic_by_ratio = {f"{ratio:.4f}": {"k": 0, "hit": 0} for ratio in dynamic_topk_ratios}
             if eval_rows and gold_chunk_ids and chunk_catalog.get("chunks"):
                 for rr in eval_rows:
                     rr["matched_chunk_ids"] = match_preview_to_chunk_ids(rr.get("preview", ""), chunk_catalog)
@@ -1013,16 +1032,22 @@ def main() -> None:
                     ) else 0
                 max_score = eval_rows[0].get("score")
                 if isinstance(max_score, (int, float)):
-                    threshold = float(max_score) * dynamic_topk_ratio
-                    dynamic_rows = [
-                        rr for rr in eval_rows
-                        if isinstance(rr.get("score"), (int, float)) and float(rr.get("score")) >= threshold
-                    ]
-                    dynamic_k = len(dynamic_rows)
-                    dynamic_hit = 1 if any(
-                        any(cid in gold_chunk_ids for cid in rr.get("matched_chunk_ids", []))
-                        for rr in dynamic_rows
-                    ) else 0
+                    max_score_f = float(max_score)
+                    for ratio in dynamic_topk_ratios:
+                        threshold = max_score_f * ratio
+                        dynamic_rows = [
+                            rr for rr in eval_rows
+                            if isinstance(rr.get("score"), (int, float)) and float(rr.get("score")) >= threshold
+                        ]
+                        dynamic_k = len(dynamic_rows)
+                        dynamic_hit = 1 if any(
+                            any(cid in gold_chunk_ids for cid in rr.get("matched_chunk_ids", []))
+                            for rr in dynamic_rows
+                        ) else 0
+                        dynamic_by_ratio[f"{ratio:.4f}"] = {"k": dynamic_k, "hit": dynamic_hit}
+
+            first_ratio_key = f"{dynamic_topk_ratios[0]:.4f}"
+            first_dynamic = dynamic_by_ratio.get(first_ratio_key, {"k": 0, "hit": 0})
 
             row = {
                 "run_id": run_id_str,
@@ -1049,9 +1074,10 @@ def main() -> None:
                 "rerank_top1_preview": rerank_top1["preview"] if rerank_top1 else "",
                 "rerank_margin_top1_top2": margin,
                 "top1_matched_chunk_ids": "|".join(str(cid) for cid in top1_matched_chunk_ids),
-                "dynamic_k": dynamic_k,
-                "dynamic_ratio": f"{dynamic_topk_ratio:.4f}",
-                "hit_at_dynamic_k": dynamic_hit,
+                "dynamic_k": first_dynamic.get("k", 0),
+                "dynamic_ratio": first_ratio_key,
+                "hit_at_dynamic_k": first_dynamic.get("hit", 0),
+                "dynamic_by_ratio": json.dumps(dynamic_by_ratio, ensure_ascii=False),
             }
             for k in eval_topks:
                 row[f"hit_at_{k}"] = hit_map.get(k, 0)
@@ -1111,6 +1137,7 @@ def main() -> None:
             "gold_file": str(gold_file),
             "gold_chunks_file": chunk_catalog_source,
             "eval_topks": eval_topks,
+            "dynamic_topk_ratios": dynamic_topk_ratios,
             "dynamic_topk_ratio": dynamic_topk_ratio,
             "bm25_ratios": _validate_ratio_list("bm25-ratios", args.bm25_ratios),
             "translation_ratios": _validate_ratio_list("translation-ratios", args.translation_ratios),
@@ -1157,6 +1184,7 @@ def main() -> None:
             "dynamic_k",
             "dynamic_ratio",
             "hit_at_dynamic_k",
+            "dynamic_by_ratio",
         ],
     )
 
@@ -1203,7 +1231,7 @@ def main() -> None:
         question_rows=question_level_rows,
         top_k=args.top_k,
         eval_topks=eval_topks,
-        dynamic_topk_ratio=dynamic_topk_ratio,
+        dynamic_topk_ratios=dynamic_topk_ratios,
     )
     build_markdown_details(
         run_dir=run_dir,

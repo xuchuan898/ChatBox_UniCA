@@ -51,9 +51,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dynamic-topk-ratio",
-        type=float,
-        default=0.90,
-        help="Dynamic top-k ratio. Keep candidates with score >= ratio * max_score (0 < ratio <= 1).",
+        type=str,
+        default="0.5,0.6,0.7,0.8,0.9",
+        help=(
+            "Comma-separated dynamic top-k ratios. "
+            "For each ratio r, keep candidates with score >= r * max_score."
+        ),
     )
     parser.add_argument(
         "--docs",
@@ -121,6 +124,22 @@ def parse_eval_topks(value: str) -> list[int]:
     unique_sorted = sorted(set(topks))
     if not unique_sorted:
         raise ValueError("No valid top-k values provided.")
+    return unique_sorted
+
+
+def parse_dynamic_topk_ratios(value: str) -> list[float]:
+    ratios = []
+    for token in (value or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        ratio = float(token)
+        if not (0.0 < ratio <= 1.0):
+            raise ValueError(f"Invalid dynamic top-k ratio: {ratio}. Must be in (0, 1].")
+        ratios.append(round(ratio, 4))
+    unique_sorted = sorted(set(ratios))
+    if not unique_sorted:
+        raise ValueError("No valid dynamic top-k ratios provided.")
     return unique_sorted
 
 
@@ -570,7 +589,7 @@ def write_summary_md(
     question_file: Path,
     runs: list[dict],
     eval_topks: list[int],
-    dynamic_topk_ratio: float,
+    dynamic_topk_ratios: list[float],
 ) -> None:
     summary_path = run_dir / "summary.md"
     lines = []
@@ -578,7 +597,8 @@ def write_summary_md(
     lines.append("")
     lines.append(f"- Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"- Question file: {question_file}")
-    lines.append(f"- Dynamic top-k ratio: {dynamic_topk_ratio:.2f}")
+    ratio_labels = ", ".join(f"{r:.2f}" for r in dynamic_topk_ratios)
+    lines.append(f"- Dynamic top-k ratios: [{ratio_labels}]")
     lines.append("")
     lines.append("## Run Table")
     lines.append("")
@@ -607,16 +627,20 @@ def write_summary_md(
                 rate = hit_rates.get(str(k))
                 rate_txt = f"{rate:.3f}" if rate is not None else "n/a"
                 lines.append(f"- Retrieval Hit@{k}: {count}/{total_eval} ({rate_txt})")
-        dyn_count = run.get("retrieval_dynamic_hit_count", 0)
-        dyn_rate = run.get("retrieval_dynamic_hit_rate")
-        dyn_k_avg = run.get("retrieval_dynamic_k_avg")
-        if total_eval and dyn_rate is not None:
-            dyn_rate_txt = f"{dyn_rate:.3f}"
-            dyn_k_avg_txt = f"{dyn_k_avg:.2f}" if dyn_k_avg is not None else "n/a"
-            lines.append(
-                f"- Retrieval Hit@DynamicK(r={dynamic_topk_ratio:.2f}): "
-                f"{dyn_count}/{total_eval} ({dyn_rate_txt}), avg K={dyn_k_avg_txt}"
-            )
+        dyn_by_ratio = run.get("retrieval_dynamic_by_ratio", {})
+        for ratio in dynamic_topk_ratios:
+            key = f"{ratio:.4f}"
+            stat = dyn_by_ratio.get(key, {})
+            dyn_count = stat.get("hit_count", 0)
+            dyn_rate = stat.get("hit_rate")
+            dyn_k_avg = stat.get("avg_k")
+            if total_eval and dyn_rate is not None:
+                dyn_rate_txt = f"{dyn_rate:.3f}"
+                dyn_k_avg_txt = f"{dyn_k_avg:.2f}" if dyn_k_avg is not None else "n/a"
+                lines.append(
+                    f"- Retrieval Hit@DynamicK(r={ratio:.2f}): "
+                    f"{dyn_count}/{total_eval} ({dyn_rate_txt}), avg K={dyn_k_avg_txt}"
+                )
         if run["loaded_line"]:
             lines.append(f"- {run['loaded_line']}")
         if run["chunks_line"]:
@@ -688,7 +712,7 @@ def write_retrieval_eval_csv(
     run_dir: Path,
     runs: list[dict],
     eval_topks: list[int],
-    dynamic_topk_ratio: float,
+    dynamic_topk_ratios: list[float],
 ) -> None:
     rows = []
     for run in runs:
@@ -716,18 +740,29 @@ def write_retrieval_eval_csv(
     ]
     for k in eval_topks:
         fieldnames.append(f"hit_at_{k}")
-    fieldnames.extend(
-        [
-            "dynamic_k",
-            "dynamic_ratio",
-            "hit_at_dynamic_k",
-        ]
-    )
+    fieldnames.extend(["dynamic_ratio", "dynamic_k", "hit_at_dynamic_k"])
+    fieldnames.append("dynamic_by_ratio")
+    for ratio in dynamic_topk_ratios:
+        ratio_slug = f"{ratio:.2f}".replace(".", "_")
+        fieldnames.extend([f"dynamic_k_r{ratio_slug}", f"hit_at_dynamic_k_r{ratio_slug}"])
     with output_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            row.setdefault("dynamic_ratio", f"{dynamic_topk_ratio:.4f}")
+            first_ratio = dynamic_topk_ratios[0]
+            first_key = f"{first_ratio:.4f}"
+            dyn_map = row.get("dynamic_by_ratio", {})
+            first_dyn = dyn_map.get(first_key, {})
+            row.setdefault("dynamic_ratio", f"{first_ratio:.4f}")
+            row.setdefault("dynamic_k", first_dyn.get("k", 0))
+            row.setdefault("hit_at_dynamic_k", first_dyn.get("hit", 0))
+            row.setdefault("dynamic_by_ratio", json.dumps(dyn_map, ensure_ascii=False))
+            for ratio in dynamic_topk_ratios:
+                ratio_key = f"{ratio:.4f}"
+                ratio_slug = f"{ratio:.2f}".replace(".", "_")
+                dyn = dyn_map.get(ratio_key, {})
+                row.setdefault(f"dynamic_k_r{ratio_slug}", dyn.get("k", 0))
+                row.setdefault(f"hit_at_dynamic_k_r{ratio_slug}", dyn.get("hit", 0))
             writer.writerow(row)
 
 
@@ -735,24 +770,25 @@ def write_retrieval_eval_md(
     run_dir: Path,
     runs: list[dict],
     eval_topks: list[int],
-    dynamic_topk_ratio: float,
+    dynamic_topk_ratios: list[float],
 ) -> None:
     lines = [
         "# Retrieval Evaluation",
         "",
         f"- Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         "- Metric: strict chunk-id matching against the fixed reference chunks file.",
-        f"- Dynamic top-k ratio: {dynamic_topk_ratio:.2f}",
+        f"- Dynamic top-k ratios: [{', '.join(f'{r:.2f}' for r in dynamic_topk_ratios)}]",
         "",
         "## Per-Run Metrics",
         "",
     ]
+    dyn_headers = [f"Hit@DynamicK(r={ratio:.2f}) | AvgK(r={ratio:.2f})" for ratio in dynamic_topk_ratios]
     header = (
         "| Tag | Questions | "
-        + " | ".join([f"Hit@{k} (count/rate)" for k in eval_topks])
-        + f" | Hit@DynamicK(r={dynamic_topk_ratio:.2f}) | Avg Dynamic-K |"
+        + " | ".join([f"Hit@{k} (count/rate)" for k in eval_topks] + dyn_headers)
+        + " |"
     )
-    sep = "| --- | ---: | " + " | ".join(["---:"] * (len(eval_topks) + 2)) + " |"
+    sep = "| --- | ---: | " + " | ".join(["---:"] * (len(eval_topks) + (2 * len(dynamic_topk_ratios)))) + " |"
     lines.append(header)
     lines.append(sep)
     for run in runs:
@@ -765,15 +801,23 @@ def write_retrieval_eval_md(
             rate = hit_rates.get(str(k))
             rate_txt = f"{rate:.3f}" if rate is not None else "n/a"
             metric_cells.append(f"{count}/{evaluated} ({rate_txt})")
-        dyn_count = run.get("retrieval_dynamic_hit_count", 0)
-        dyn_rate = run.get("retrieval_dynamic_hit_rate")
-        dyn_k_avg = run.get("retrieval_dynamic_k_avg")
-        dyn_rate_txt = f"{dyn_rate:.3f}" if dyn_rate is not None else "n/a"
-        dyn_k_avg_txt = f"{dyn_k_avg:.2f}" if dyn_k_avg is not None else "n/a"
+        dyn_by_ratio = run.get("retrieval_dynamic_by_ratio", {})
+        dyn_cells = []
+        for ratio in dynamic_topk_ratios:
+            key = f"{ratio:.4f}"
+            stat = dyn_by_ratio.get(key, {})
+            dyn_count = stat.get("hit_count", 0)
+            dyn_rate = stat.get("hit_rate")
+            dyn_k_avg = stat.get("avg_k")
+            dyn_rate_txt = f"{dyn_rate:.3f}" if dyn_rate is not None else "n/a"
+            dyn_k_avg_txt = f"{dyn_k_avg:.2f}" if dyn_k_avg is not None else "n/a"
+            dyn_cells.extend([f"{dyn_count}/{evaluated} ({dyn_rate_txt})", dyn_k_avg_txt])
         lines.append(
             f"| {run['tag']} | {evaluated} | "
             + " | ".join(metric_cells)
-            + f" | {dyn_count}/{evaluated} ({dyn_rate_txt}) | {dyn_k_avg_txt} |"
+            + " | "
+            + " | ".join(dyn_cells)
+            + " |"
         )
 
     lines.extend(["", "## Per-Question Top1 View", ""])
@@ -781,15 +825,21 @@ def write_retrieval_eval_md(
         lines.append(f"### {run['tag']}")
         lines.append("")
         top1_key = f"hit_at_{eval_topks[0]}"
-        lines.append(f"| Q | {top1_key} | DynamicK | Hit@DynamicK | Top1 Score | Top1 Matched Chunk IDs | Top1 Preview |")
-        lines.append("| ---: | :---: | ---: | :---: | ---: | --- | --- |")
+        lines.append("| Q | Top1 | DynamicK/Hit By Ratio | Top1 Score | Top1 Matched Chunk IDs | Top1 Preview |")
+        lines.append("| ---: | :---: | --- | ---: | --- | --- |")
         for item in run.get("retrieval_eval", []):
             score = item.get("top1_score")
+            dyn_map = item.get("dynamic_by_ratio", {})
+            dyn_txt_parts = []
+            for ratio in dynamic_topk_ratios:
+                key = f"{ratio:.4f}"
+                dyn = dyn_map.get(key, {})
+                dyn_txt_parts.append(f"r={ratio:.2f}:K={dyn.get('k', 0)},{'✅' if dyn.get('hit', 0) == 1 else '❌'}")
+            dyn_txt = "<br>".join(dyn_txt_parts)
             lines.append(
                 f"| {item.get('q_id', '')} | "
                 f"{'✅' if item.get(top1_key) == 1 else '❌'} | "
-                f"{item.get('dynamic_k', '')} | "
-                f"{'✅' if item.get('hit_at_dynamic_k') == 1 else '❌'} | "
+                f"{dyn_txt} | "
                 f"{(f'{score:.4f}' if score is not None else '')} | "
                 f"{item.get('top1_matched_chunk_ids', '')} | "
                 f"{item.get('top1_preview', '')} |"
@@ -973,9 +1023,7 @@ def main() -> None:
     gold_file = resolve_path(project_root, args.gold_file).resolve()
     gold_chunks_file = resolve_path(project_root, args.gold_chunks_file).resolve() if args.gold_chunks_file else None
     eval_topks = parse_eval_topks(args.eval_topk)
-    dynamic_topk_ratio = float(args.dynamic_topk_ratio)
-    if not (0.0 < dynamic_topk_ratio <= 1.0):
-        raise ValueError(f"--dynamic-topk-ratio must be in (0, 1], got: {dynamic_topk_ratio}")
+    dynamic_topk_ratios = parse_dynamic_topk_ratios(args.dynamic_topk_ratio)
     max_eval_k = max(eval_topks)
     docs = [resolve_path(project_root, d).resolve() for d in args.docs]
     output_base = resolve_path(project_root, args.output_dir).resolve()
@@ -1010,7 +1058,7 @@ def main() -> None:
     print(f"[INFO] Gold entries loaded: {len(gold_map)}", flush=True)
     print(f"[INFO] Gold chunks loaded: {len(chunk_catalog.get('chunks', []))}", flush=True)
     print(f"[INFO] Retrieval eval top-k: {eval_topks}", flush=True)
-    print(f"[INFO] Retrieval dynamic top-k ratio: {dynamic_topk_ratio:.2f}", flush=True)
+    print(f"[INFO] Retrieval dynamic top-k ratios: {[round(r, 2) for r in dynamic_topk_ratios]}", flush=True)
     print(f"[INFO] Output dir: {run_dir}", flush=True)
     print(f"[INFO] Total docs to test: {len(docs)}", flush=True)
     print(f"[INFO] PATH prepended with: {args.ollama_bin_dir.expanduser()}", flush=True)
@@ -1170,8 +1218,7 @@ def main() -> None:
             rerank_rows = rerank_rows[:max_eval_k]
             hit_map = {k: 0 for k in eval_topks}
             top1_matched_chunk_ids = []
-            dynamic_k = 0
-            dynamic_hit = 0
+            dynamic_by_ratio = {f"{ratio:.4f}": {"k": 0, "hit": 0} for ratio in dynamic_topk_ratios}
 
             if rerank_rows and gold_chunk_ids and chunk_catalog.get("chunks"):
                 for row in rerank_rows:
@@ -1185,18 +1232,24 @@ def main() -> None:
                     ) else 0
                 max_score = rerank_rows[0].get("score")
                 if isinstance(max_score, (int, float)):
-                    threshold = float(max_score) * dynamic_topk_ratio
-                    dynamic_rows = [
-                        row for row in rerank_rows
-                        if isinstance(row.get("score"), (int, float)) and float(row.get("score")) >= threshold
-                    ]
-                    dynamic_k = len(dynamic_rows)
-                    dynamic_hit = 1 if any(
-                        any(cid in gold_chunk_ids for cid in row.get("matched_chunk_ids", []))
-                        for row in dynamic_rows
-                    ) else 0
+                    max_score_f = float(max_score)
+                    for ratio in dynamic_topk_ratios:
+                        threshold = max_score_f * ratio
+                        dynamic_rows = [
+                            row for row in rerank_rows
+                            if isinstance(row.get("score"), (int, float)) and float(row.get("score")) >= threshold
+                        ]
+                        dynamic_k = len(dynamic_rows)
+                        dynamic_hit = 1 if any(
+                            any(cid in gold_chunk_ids for cid in row.get("matched_chunk_ids", []))
+                            for row in dynamic_rows
+                        ) else 0
+                        dynamic_by_ratio[f"{ratio:.4f}"] = {"k": dynamic_k, "hit": dynamic_hit}
 
             top1 = rerank_rows[0] if rerank_rows else None
+            first_ratio = dynamic_topk_ratios[0]
+            first_ratio_key = f"{first_ratio:.4f}"
+            first_dynamic = dynamic_by_ratio.get(first_ratio_key, {"k": 0, "hit": 0})
             row = {
                 "q_id": answer_item.get("q_id", q_idx + 1),
                 "question": question,
@@ -1206,9 +1259,10 @@ def main() -> None:
                 "top1_matched_chunk_ids": "|".join(str(cid) for cid in top1_matched_chunk_ids),
                 "top1_score": top1.get("score") if top1 else None,
                 "top1_preview": top1.get("preview", "") if top1 else "",
-                "dynamic_k": dynamic_k,
-                "dynamic_ratio": f"{dynamic_topk_ratio:.4f}",
-                "hit_at_dynamic_k": dynamic_hit,
+                "dynamic_k": first_dynamic.get("k", 0),
+                "dynamic_ratio": first_ratio_key,
+                "hit_at_dynamic_k": first_dynamic.get("hit", 0),
+                "dynamic_by_ratio": dynamic_by_ratio,
             }
             for k in eval_topks:
                 row[f"hit_at_{k}"] = hit_map.get(k, 0)
@@ -1219,6 +1273,10 @@ def main() -> None:
         retrieval_dynamic_hit_count = 0
         retrieval_dynamic_hit_rate = None
         retrieval_dynamic_k_avg = None
+        retrieval_dynamic_by_ratio = {
+            f"{ratio:.4f}": {"hit_count": 0, "hit_rate": None, "avg_k": None}
+            for ratio in dynamic_topk_ratios
+        }
         if retrieval_eval_rows:
             total_eval = len(retrieval_eval_rows)
             for k in eval_topks:
@@ -1226,9 +1284,26 @@ def main() -> None:
                 hit_count = sum(int(item.get(key, 0)) for item in retrieval_eval_rows)
                 retrieval_hit_counts[str(k)] = hit_count
                 retrieval_hit_rates[str(k)] = hit_count / total_eval
-            retrieval_dynamic_hit_count = sum(int(item.get("hit_at_dynamic_k", 0)) for item in retrieval_eval_rows)
-            retrieval_dynamic_hit_rate = retrieval_dynamic_hit_count / total_eval
-            retrieval_dynamic_k_avg = sum(int(item.get("dynamic_k", 0)) for item in retrieval_eval_rows) / total_eval
+            for ratio in dynamic_topk_ratios:
+                ratio_key = f"{ratio:.4f}"
+                hit_count = sum(
+                    int(item.get("dynamic_by_ratio", {}).get(ratio_key, {}).get("hit", 0))
+                    for item in retrieval_eval_rows
+                )
+                avg_k = sum(
+                    int(item.get("dynamic_by_ratio", {}).get(ratio_key, {}).get("k", 0))
+                    for item in retrieval_eval_rows
+                ) / total_eval
+                retrieval_dynamic_by_ratio[ratio_key] = {
+                    "hit_count": hit_count,
+                    "hit_rate": hit_count / total_eval,
+                    "avg_k": avg_k,
+                }
+            first_ratio_key = f"{dynamic_topk_ratios[0]:.4f}"
+            first_stat = retrieval_dynamic_by_ratio.get(first_ratio_key, {})
+            retrieval_dynamic_hit_count = int(first_stat.get("hit_count", 0))
+            retrieval_dynamic_hit_rate = first_stat.get("hit_rate")
+            retrieval_dynamic_k_avg = first_stat.get("avg_k")
 
         retrieval_hit_at_1 = retrieval_hit_rates.get("1")
         retrieval_hit_at_5 = retrieval_hit_rates.get("5")
@@ -1262,6 +1337,7 @@ def main() -> None:
             "retrieval_eval_total": len(retrieval_eval_rows),
             "retrieval_hit_counts": retrieval_hit_counts,
             "retrieval_hit_rates": retrieval_hit_rates,
+            "retrieval_dynamic_by_ratio": retrieval_dynamic_by_ratio,
             "retrieval_dynamic_hit_count": retrieval_dynamic_hit_count,
             "retrieval_dynamic_hit_rate": retrieval_dynamic_hit_rate,
             "retrieval_dynamic_k_avg": retrieval_dynamic_k_avg,
@@ -1269,12 +1345,12 @@ def main() -> None:
             "retrieval_hit_at_5": retrieval_hit_at_5,
         })
 
-    write_summary_md(run_dir, question_file, runs, eval_topks, dynamic_topk_ratio)
+    write_summary_md(run_dir, question_file, runs, eval_topks, dynamic_topk_ratios)
     write_comparison_csv(run_dir, runs)
     write_retrieval_trace_md(run_dir, runs)
     write_retrieval_full_md(run_dir, runs)
-    write_retrieval_eval_csv(run_dir, runs, eval_topks, dynamic_topk_ratio)
-    write_retrieval_eval_md(run_dir, runs, eval_topks, dynamic_topk_ratio)
+    write_retrieval_eval_csv(run_dir, runs, eval_topks, dynamic_topk_ratios)
+    write_retrieval_eval_md(run_dir, runs, eval_topks, dynamic_topk_ratios)
     (run_dir / "summary.json").write_text(json.dumps(runs, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print("[INFO] Experiment done.", flush=True)
