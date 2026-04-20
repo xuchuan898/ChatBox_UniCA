@@ -37,8 +37,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gold-chunks-file",
         type=Path,
-        default=Path("experiments/results/format_compare_20260414_162147/answers/master_md.chunks.jsonl"),
-        help="Reference chunks jsonl used for strict retrieval evaluation by chunk id.",
+        default=None,
+        help=(
+            "Reference chunks jsonl used for strict retrieval evaluation by chunk id. "
+            "If omitted, uses current run output: answers/master_md.chunks.jsonl."
+        ),
     )
     parser.add_argument(
         "--eval-topk",
@@ -911,7 +914,7 @@ def main() -> None:
     project_root = args.project_root.resolve()
     question_file = resolve_path(project_root, args.question_file).resolve()
     gold_file = resolve_path(project_root, args.gold_file).resolve()
-    gold_chunks_file = resolve_path(project_root, args.gold_chunks_file).resolve()
+    gold_chunks_file = resolve_path(project_root, args.gold_chunks_file).resolve() if args.gold_chunks_file else None
     eval_topks = parse_eval_topks(args.eval_topk)
     max_eval_k = max(eval_topks)
     docs = [resolve_path(project_root, d).resolve() for d in args.docs]
@@ -921,7 +924,11 @@ def main() -> None:
     if not question_file.exists():
         raise FileNotFoundError(f"Question file not found: {question_file}")
     gold_map = load_gold_map(gold_file if gold_file.exists() else None)
-    chunk_catalog = load_chunk_catalog(gold_chunks_file if gold_chunks_file.exists() else None)
+    chunk_catalog = {}
+    chunk_catalog_source = ""
+    if gold_chunks_file and gold_chunks_file.exists():
+        chunk_catalog = load_chunk_catalog(gold_chunks_file)
+        chunk_catalog_source = str(gold_chunks_file)
     if not docs:
         raise ValueError("No doc files provided.")
 
@@ -932,10 +939,14 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
     answers_dir.mkdir(parents=True, exist_ok=True)
+    default_gold_chunks_file = answers_dir / "master_md.chunks.jsonl"
     print(f"[INFO] Project root: {project_root}", flush=True)
     print(f"[INFO] Question file: {question_file}", flush=True)
     print(f"[INFO] Gold file: {gold_file if gold_file.exists() else '[missing]'}", flush=True)
-    print(f"[INFO] Gold chunks file: {gold_chunks_file if gold_chunks_file.exists() else '[missing]'}", flush=True)
+    if gold_chunks_file:
+        print(f"[INFO] Gold chunks file: {gold_chunks_file if gold_chunks_file.exists() else '[missing]'}", flush=True)
+    else:
+        print(f"[INFO] Gold chunks file: [auto] {default_gold_chunks_file}", flush=True)
     print(f"[INFO] Gold entries loaded: {len(gold_map)}", flush=True)
     print(f"[INFO] Gold chunks loaded: {len(chunk_catalog.get('chunks', []))}", flush=True)
     print(f"[INFO] Retrieval eval top-k: {eval_topks}", flush=True)
@@ -1061,6 +1072,25 @@ def main() -> None:
                 chunk_summary = f"[ERROR reading chunk file: {e}]"
         else:
             chunk_summary = "[No chunk file generated]"
+
+        # Auto-bind strict evaluation chunks file to current run's master_md output if not explicitly provided.
+        if not chunk_catalog:
+            if gold_chunks_file and gold_chunks_file.exists():
+                chunk_catalog = load_chunk_catalog(gold_chunks_file)
+                chunk_catalog_source = str(gold_chunks_file)
+            elif tag == "master_md" and chunk_path.exists():
+                chunk_catalog = load_chunk_catalog(chunk_path)
+                chunk_catalog_source = str(chunk_path)
+            elif default_gold_chunks_file.exists():
+                chunk_catalog = load_chunk_catalog(default_gold_chunks_file)
+                chunk_catalog_source = str(default_gold_chunks_file)
+
+            if chunk_catalog:
+                print(
+                    f"[RUN {idx}/{len(docs)}] Loaded strict eval chunk catalog from: {chunk_catalog_source} "
+                    f"(chunks={len(chunk_catalog.get('chunks', []))})",
+                    flush=True,
+                )
 
         answers = parse_answers(answer_path)
         retrieval_md_blocks = extract_retrieval_markdown_blocks(log_text)
