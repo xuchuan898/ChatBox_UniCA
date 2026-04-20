@@ -1,0 +1,327 @@
+{
+  "source_question_file": "questions/questions_batch_student_short_typo_en_fr.txt",
+  "doc_file": "docs/chroma/master.md",
+  "gold_chunks_file": "experiments/results/format_compare_20260414_162147/answers/master_md.chunks.jsonl",
+  "items": [
+    {
+      "qid": 1,
+      "lang": "en",
+      "question": "Who is the M2 head, and what is the email?",
+      "expected_answer": "Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr).",
+      "gold_chunk": "PARCOURS IA > Responsable de master",
+      "gold_chunk_ids": [9]
+    },
+    {
+      "qid": 1,
+      "lang": "fr",
+      "question": "Qui est responsable du M2, et quel est son e-mail ?",
+      "expected_answer": "Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr).",
+      "gold_chunk": "PARCOURS IA > Responsable de master",
+      "gold_chunk_ids": [9]
+    },
+    {
+      "qid": 2,
+      "lang": "en",
+      "question": "Who is the program assistant, with email?",
+      "expected_answer": "Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr).",
+      "gold_chunk": "PARCOURS IA > Responsable de master",
+      "gold_chunk_ids": [9]
+    },
+    {
+      "qid": 2,
+      "lang": "fr",
+      "question": "Qui est l'assistant du master, avec l'e-mail ?",
+      "expected_answer": "Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr).",
+      "gold_chunk": "PARCOURS IA > Responsable de master",
+      "gold_chunk_ids": [9]
+    },
+    {
+      "qid": 3,
+      "lang": "en",
+      "question": "What is the alternnce contact email for M1?",
+      "expected_answer": "Etienne Lozes (Etienne.LOZES@univ-cotedazur.fr).",
+      "gold_chunk": "PARCOURS IA > Responsable de master",
+      "gold_chunk_ids": [9]
+    },
+    {
+      "qid": 3,
+      "lang": "fr",
+      "question": "Quel est l'e-mail du contact alternance pour le M1 ?",
+      "expected_answer": "Etienne Lozes (Etienne.LOZES@univ-cotedazur.fr).",
+      "gold_chunk": "PARCOURS IA > Responsable de master",
+      "gold_chunk_ids": [9]
+    },
+    {
+      "qid": 4,
+      "lang": "en",
+      "question": "How long is the mandatory internship?",
+      "expected_answer": "4 to 6 months.",
+      "gold_chunk": "PARCOURS IA > Stage : oui, 4 a 6 mois",
+      "gold_chunk_ids": [8]
+    },
+    {
+      "qid": 4,
+      "lang": "fr",
+      "question": "Quelle est la duree du stage obligatoir ?",
+      "expected_answer": "4 a 6 mois.",
+      "gold_chunk": "PARCOURS IA > Stage : oui, 4 a 6 mois",
+      "gold_chunk_ids": [8]
+    },
+    {
+      "qid": 5,
+      "lang": "en",
+      "question": "How many ECTS is Neural Language Processing?",
+      "expected_answer": "3 ECTS.",
+      "gold_chunk": "Semestre 1 > UE Neural Language Processing",
+      "gold_chunk_ids": [13]
+    },
+    {
+      "qid": 5,
+      "lang": "fr",
+      "question": "Combien d'ECTS vaut Neural Language Processing ?",
+      "expected_answer": "3 ECTS.",
+      "gold_chunk": "Semestre 1 > UE Neural Language Processing",
+      "gold_chunk_ids": [13]
+    },
+    {
+      "qid": 6,
+      "lang": "en",
+      "question": "Who teaches AI Game Programming in S1?",
+      "expected_answer": "M. Regin.",
+      "gold_chunk": "Semestre 1 > UE AI Game Programming",
+      "gold_chunk_ids": [10]
+    },
+    {
+      "qid": 6,
+      "lang": "fr",
+      "question": "Qui enseigne AI Game Programing en S1 ?",
+      "expected_answer": "M. Regin.",
+      "gold_chunk": "Semestre 1 > UE AI Game Programming",
+      "gold_chunk_ids": [10]
+    },
+    {
+      "qid": 7,
+      "lang": "en",
+      "question": "Which two courses are taught by M. Regin?",
+      "expected_answer": "UE AI Game Programming (S1) and UE Combinatorial Optimization (S2).",
+      "gold_chunk": "Semestre 1/2 courses taught by M. Regin",
+      "gold_chunk_ids": [10, 29]
+    },
+    {
+      "qid": 7,
+      "lang": "fr",
+      "question": "Quelles sont les deux UE enseignees par M. Regin ?",
+      "expected_answer": "UE AI Game Programming (S1) et UE Combinatorial Optimization (S2).",
+      "gold_chunk": "Semestre 1/2 courses taught by M. Regin",
+      "gold_chunk_ids": [10, 29]
+    },
+    {
+      "qid": 8,
+      "lang": "en",
+      "question": "Which S2 course includes belief revision and fuzzy logic?",
+      "expected_answer": "UE Logic for AI (EN).",
+      "gold_chunk": "Semestre 2 > UE Logic for AI",
+      "gold_chunk_ids": [30]
+    },
+    {
+      "qid": 8,
+      "lang": "fr",
+      "question": "Quelle UE de S2 parle de revision des croyances et de logique floue ?",
+      "expected_answer": "UE Logic for AI (EN).",
+      "gold_chunk": "Semestre 2 > UE Logic for AI",
+      "gold_chunk_ids": [30]
+    },
+    {
+      "qid": 9,
+      "lang": "en",
+      "question": "Which S2 course mentions text classificatn and sentiment analysis?",
+      "expected_answer": "UE Natural Language Processing (EN).",
+      "gold_chunk": "Semestre 2 > UE Natural Language Processing",
+      "gold_chunk_ids": [27, 28]
+    },
+    {
+      "qid": 9,
+      "lang": "fr",
+      "question": "Quelle UE de S2 mentionne la classification de texte et l'analyse de sentiment ?",
+      "expected_answer": "UE Natural Language Processing (EN).",
+      "gold_chunk": "Semestre 2 > UE Natural Language Processing",
+      "gold_chunk_ids": [27, 28]
+    },
+    {
+      "qid": 10,
+      "lang": "en",
+      "question": "Which S1 course covers Kripke and CTL/LTL?",
+      "expected_answer": "UE Model Checking for AI (EN).",
+      "gold_chunk": "Semestre 1 > UE Model Checking for AI",
+      "gold_chunk_ids": [12]
+    },
+    {
+      "qid": 10,
+      "lang": "fr",
+      "question": "Quelle UE de S1 couvre Kripke et CTL/LTL ?",
+      "expected_answer": "UE Model Checking for AI (EN).",
+      "gold_chunk": "Semestre 1 > UE Model Checking for AI",
+      "gold_chunk_ids": [12]
+    },
+    {
+      "qid": 11,
+      "lang": "en",
+      "question": "Which S1 course says students solve ACM-style puzzles?",
+      "expected_answer": "Programming Challenge (EN).",
+      "gold_chunk": "Semestre 1 > Programming Challenge",
+      "gold_chunk_ids": [22]
+    },
+    {
+      "qid": 11,
+      "lang": "fr",
+      "question": "Quelle UE de S1 indique des enigmes type ACM ?",
+      "expected_answer": "Programming Challenge (EN).",
+      "gold_chunk": "Semestre 1 > Programming Challenge",
+      "gold_chunk_ids": [22]
+    },
+    {
+      "qid": 12,
+      "lang": "en",
+      "question": "Which S1 elective is about GPU cluster ML parallelization?",
+      "expected_answer": "Distributed Computing and Learning (EN).",
+      "gold_chunk": "Semestre 1 > Distributed Computing and Learning",
+      "gold_chunk_ids": [21]
+    },
+    {
+      "qid": 12,
+      "lang": "fr",
+      "question": "Quelle UE au choix de S1 traite de ML sur cluster GPU ?",
+      "expected_answer": "Distributed Computing and Learning (EN).",
+      "gold_chunk": "Semestre 1 > Distributed Computing and Learning",
+      "gold_chunk_ids": [21]
+    },
+    {
+      "qid": 13,
+      "lang": "en",
+      "question": "Which S2 course is taught by M. Malapert?",
+      "expected_answer": "UE Modelisation par des contraintes.",
+      "gold_chunk": "Semestre 2 > UE Modelisation par des contraintes",
+      "gold_chunk_ids": [31]
+    },
+    {
+      "qid": 13,
+      "lang": "fr",
+      "question": "Quelle UE de S2 est enseignee par M. Malapert ?",
+      "expected_answer": "UE Modelisation par des contraintes.",
+      "gold_chunk": "Semestre 2 > UE Modelisation par des contraintes",
+      "gold_chunk_ids": [31]
+    },
+    {
+      "qid": 14,
+      "lang": "en",
+      "question": "Which S2 elective is taught by M. Buffa?",
+      "expected_answer": "3D Game Programming in Real Time on the Web (EN).",
+      "gold_chunk": "Semestre 2 > 3D Game Programming in Real Time on the Web",
+      "gold_chunk_ids": [36]
+    },
+    {
+      "qid": 14,
+      "lang": "fr",
+      "question": "Quelle UE au choix de S2 est enseignee par M. Buffa ?",
+      "expected_answer": "3D Game Programming in Real Time on the Web (EN).",
+      "gold_chunk": "Semestre 2 > 3D Game Programming in Real Time on the Web",
+      "gold_chunk_ids": [36]
+    },
+    {
+      "qid": 15,
+      "lang": "en",
+      "question": "Which S2 elective is taught by M. Lozes?",
+      "expected_answer": "Scalable Data Science (EN).",
+      "gold_chunk": "Semestre 2 > Scalable Data Science",
+      "gold_chunk_ids": [35]
+    },
+    {
+      "qid": 15,
+      "lang": "fr",
+      "question": "Quelle UE au choix de S2 est enseignee par M. Lozes ?",
+      "expected_answer": "Scalable Data Science (EN).",
+      "gold_chunk": "Semestre 2 > Scalable Data Science",
+      "gold_chunk_ids": [35]
+    },
+    {
+      "qid": 16,
+      "lang": "en",
+      "question": "Which S2 elective is taught by Mme. Di Giusto?",
+      "expected_answer": "Modelling Distributed Systems (EN).",
+      "gold_chunk": "Semestre 2 > Modelling Distributed Systems",
+      "gold_chunk_ids": [37]
+    },
+    {
+      "qid": 16,
+      "lang": "fr",
+      "question": "Quelle UE au choix de S2 est enseignee par Mme. Di Giusto ?",
+      "expected_answer": "Modelling Distributed Systems (EN).",
+      "gold_chunk": "Semestre 2 > Modelling Distributed Systems",
+      "gold_chunk_ids": [37]
+    },
+    {
+      "qid": 17,
+      "lang": "en",
+      "question": "Which S2 elective is taught by E. Formenti?",
+      "expected_answer": "Computational Complexity (EN).",
+      "gold_chunk": "Semestre 2 > Computational Complexity",
+      "gold_chunk_ids": [38]
+    },
+    {
+      "qid": 17,
+      "lang": "fr",
+      "question": "Quelle UE au choix de S2 est enseignee par E. Formenti ?",
+      "expected_answer": "Computational Complexity (EN).",
+      "gold_chunk": "Semestre 2 > Computational Complexity",
+      "gold_chunk_ids": [38]
+    },
+    {
+      "qid": 18,
+      "lang": "en",
+      "question": "Which S1 course is co-taught by Leturc and Regin?",
+      "expected_answer": "UE Software Engineering Software engineering and Design patterns (EN).",
+      "gold_chunk": "Semestre 1 > UE Software Engineering Software engineering and Design patterns",
+      "gold_chunk_ids": [14]
+    },
+    {
+      "qid": 18,
+      "lang": "fr",
+      "question": "Quelle UE de S1 est co-enseignee par Leturc et Regin ?",
+      "expected_answer": "UE Software Engineering Software engineering and Design patterns (EN).",
+      "gold_chunk": "Semestre 1 > UE Software Engineering Software engineering and Design patterns",
+      "gold_chunk_ids": [14]
+    },
+    {
+      "qid": 19,
+      "lang": "en",
+      "question": "What creation date is shown on the M1 document?",
+      "expected_answer": "11 mars 2026.",
+      "gold_chunk": "MASTER IA Information (header)",
+      "gold_chunk_ids": [0]
+    },
+    {
+      "qid": 19,
+      "lang": "fr",
+      "question": "Quelle date de creation est affichee sur le document M1 ?",
+      "expected_answer": "11 mars 2026.",
+      "gold_chunk": "MASTER IA Information (header)",
+      "gold_chunk_ids": [0]
+    },
+    {
+      "qid": 20,
+      "lang": "en",
+      "question": "Which 3 practical learning formats are listed in pedagogy?",
+      "expected_answer": "Projets encadres, etudes de cas, travaux de groupe.",
+      "gold_chunk": "PARCOURS IA > Pedagogie",
+      "gold_chunk_ids": [4]
+    },
+    {
+      "qid": 20,
+      "lang": "fr",
+      "question": "Quels sont les 3 formats pratiques cites dans la pedagogie ?",
+      "expected_answer": "Projets encadres, etudes de cas, travaux de groupe.",
+      "gold_chunk": "PARCOURS IA > Pedagogie",
+      "gold_chunk_ids": [4]
+    }
+  ]
+}

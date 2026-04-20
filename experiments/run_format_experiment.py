@@ -35,6 +35,18 @@ def parse_args() -> argparse.Namespace:
         help="Gold file with expected answers and gold chunks for retrieval evaluation.",
     )
     parser.add_argument(
+        "--gold-chunks-file",
+        type=Path,
+        default=Path("experiments/results/format_compare_20260414_162147/answers/master_md.chunks.jsonl"),
+        help="Reference chunks jsonl used for strict retrieval evaluation by chunk id.",
+    )
+    parser.add_argument(
+        "--eval-topk",
+        type=str,
+        default="1,5,8",
+        help="Comma-separated top-k values for retrieval evaluation (e.g., 1,5,8).",
+    )
+    parser.add_argument(
         "--docs",
         type=Path,
         nargs="*",
@@ -85,6 +97,22 @@ def parse_args() -> argparse.Namespace:
 
 def resolve_path(project_root: Path, path: Path) -> Path:
     return path if path.is_absolute() else (project_root / path)
+
+
+def parse_eval_topks(value: str) -> list[int]:
+    topks = []
+    for token in (value or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        k = int(token)
+        if k <= 0:
+            raise ValueError(f"Invalid top-k value: {k}. Must be > 0.")
+        topks.append(k)
+    unique_sorted = sorted(set(topks))
+    if not unique_sorted:
+        raise ValueError("No valid top-k values provided.")
+    return unique_sorted
 
 
 def ollama_is_ready(ollama_host: str) -> bool:
@@ -388,9 +416,20 @@ def load_gold_map(path: Path | None) -> dict:
         question = str(item.get("question", "")).strip()
         if not question:
             continue
+        chunk_ids = item.get("gold_chunk_ids")
+        if chunk_ids is None:
+            chunk_id = item.get("gold_chunk_id")
+            chunk_ids = [chunk_id] if chunk_id is not None else []
+        normalized_chunk_ids = []
+        for cid in chunk_ids:
+            try:
+                normalized_chunk_ids.append(int(cid))
+            except (TypeError, ValueError):
+                continue
         mapping[question] = {
             "expected_answer": item.get("expected_answer", ""),
             "gold_chunk": item.get("gold_chunk", ""),
+            "gold_chunk_ids": normalized_chunk_ids,
             "lang": item.get("lang", ""),
             "qid": item.get("qid", ""),
         }
@@ -404,34 +443,85 @@ def _normalize_for_match(text: str) -> str:
     return lowered
 
 
-def _gold_terms(gold_chunk: str) -> list[str]:
-    if not gold_chunk:
+def extract_context_label(text: str) -> str:
+    if not text:
+        return ""
+    match = re.search(r"\[Context:\s*(.*?)\]", text, flags=re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def load_chunk_catalog(path: Path | None) -> dict:
+    catalog = {
+        "path": str(path) if path else "",
+        "chunks": [],
+        "by_context": {},
+    }
+    if not path or not path.exists():
+        return catalog
+
+    chunks = []
+    by_context = {}
+    with path.open("r", encoding="utf-8", errors="ignore") as f:
+        for idx, line in enumerate(f):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            content = str(rec.get("content", ""))
+            context = extract_context_label(content)
+            norm_content = _normalize_for_match(content)
+            norm_context = _normalize_for_match(context)
+            item = {
+                "chunk_id": idx,
+                "content": content,
+                "norm_content": norm_content,
+                "context": context,
+                "norm_context": norm_context,
+                "chunk_type": rec.get("chunk_type", ""),
+            }
+            chunks.append(item)
+            if norm_context:
+                by_context.setdefault(norm_context, []).append(idx)
+
+    catalog["chunks"] = chunks
+    catalog["by_context"] = by_context
+    return catalog
+
+
+def match_preview_to_chunk_ids(preview: str, chunk_catalog: dict) -> list[int]:
+    if not preview or not chunk_catalog.get("chunks"):
         return []
-    parts = [p.strip() for p in gold_chunk.split(">") if p.strip()]
-    if not parts:
+
+    context = extract_context_label(preview)
+    norm_context = _normalize_for_match(context)
+    norm_preview = _normalize_for_match(preview.replace("...", " "))
+    if len(norm_preview) < 8:
         return []
-    candidates = [parts[-1]]
-    if len(parts) >= 2:
-        candidates.append(parts[-2])
-    terms = []
-    for c in candidates:
-        norm = _normalize_for_match(c)
-        if norm and len(norm) >= 4:
-            terms.append(norm)
-    return terms
+
+    chunks = chunk_catalog.get("chunks", [])
+    by_context = chunk_catalog.get("by_context", {})
+
+    # Prefer context matching when available.
+    if norm_context:
+        context_ids = by_context.get(norm_context, [])
+        if len(context_ids) == 1:
+            return context_ids
+        if context_ids:
+            narrowed = [cid for cid in context_ids if norm_preview in chunks[cid]["norm_content"]]
+            if len(narrowed) == 1:
+                return narrowed
+            if narrowed:
+                return sorted(set(narrowed))
+
+    # Fallback: normalized substring match over all chunks.
+    matched = [c["chunk_id"] for c in chunks if norm_preview in c["norm_content"]]
+    return sorted(set(matched))
 
 
-def preview_matches_gold(preview: str, gold_chunk: str) -> bool:
-    if not preview or not gold_chunk:
-        return False
-    p = _normalize_for_match(preview)
-    terms = _gold_terms(gold_chunk)
-    if not terms:
-        return False
-    return any(term in p for term in terms)
-
-
-def parse_rerank_rows_from_block(block: str, top_k: int = 5) -> dict:
+def parse_rerank_rows_from_block(block: str) -> dict:
     question = ""
     section = ""
     rerank_rows = []
@@ -463,10 +553,10 @@ def parse_rerank_rows_from_block(block: str, top_k: int = 5) -> dict:
                     "preview": cells[5],
                 }
             )
-    return {"question": question, "rerank_rows": rerank_rows[:top_k]}
+    return {"question": question, "rerank_rows": rerank_rows}
 
 
-def write_summary_md(run_dir: Path, question_file: Path, runs: list[dict]) -> None:
+def write_summary_md(run_dir: Path, question_file: Path, runs: list[dict], eval_topks: list[int]) -> None:
     summary_path = run_dir / "summary.md"
     lines = []
     lines.append("# Format Experiment Summary")
@@ -492,10 +582,15 @@ def write_summary_md(run_dir: Path, question_file: Path, runs: list[dict]) -> No
         lines.append("")
         if run["error_hint"]:
             lines.append(f"- Error hint: {run['error_hint']}")
-        if run.get("retrieval_hit_at_1") is not None:
-            lines.append(f"- Retrieval Hit@1 (gold): {run['retrieval_hit_at_1']:.3f}")
-        if run.get("retrieval_hit_at_5") is not None:
-            lines.append(f"- Retrieval Hit@5 (gold): {run['retrieval_hit_at_5']:.3f}")
+        hit_counts = run.get("retrieval_hit_counts", {})
+        hit_rates = run.get("retrieval_hit_rates", {})
+        total_eval = run.get("retrieval_eval_total", 0)
+        if total_eval:
+            for k in eval_topks:
+                count = hit_counts.get(str(k), 0)
+                rate = hit_rates.get(str(k))
+                rate_txt = f"{rate:.3f}" if rate is not None else "n/a"
+                lines.append(f"- Retrieval Hit@{k}: {count}/{total_eval} ({rate_txt})")
         if run["loaded_line"]:
             lines.append(f"- {run['loaded_line']}")
         if run["chunks_line"]:
@@ -536,7 +631,7 @@ def write_summary_md(run_dir: Path, question_file: Path, runs: list[dict]) -> No
     lines.append("")
     lines.append("- Use `comparison.csv` for side-by-side answer review.")
     lines.append("- Use raw logs to inspect retrieval details and failure points.")
-    lines.append("- Use `retrieval_eval.md` and `retrieval_eval.csv` for retrieval-focused evaluation (Hit@1/Hit@5).")
+    lines.append("- Use `retrieval_eval.md` and `retrieval_eval.csv` for retrieval-focused evaluation by strict chunk-id hit@k.")
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -563,7 +658,7 @@ def write_comparison_csv(run_dir: Path, runs: list[dict]) -> None:
             writer.writerow(row)
 
 
-def write_retrieval_eval_csv(run_dir: Path, runs: list[dict]) -> None:
+def write_retrieval_eval_csv(run_dir: Path, runs: list[dict], eval_topks: list[int]) -> None:
     rows = []
     for run in runs:
         for item in run.get("retrieval_eval", []):
@@ -581,13 +676,15 @@ def write_retrieval_eval_csv(run_dir: Path, runs: list[dict]) -> None:
         "doc_path",
         "q_id",
         "question",
+        "gold_chunk_ids",
         "gold_chunk",
         "expected_answer",
-        "hit_at_1",
-        "hit_at_5",
+        "top1_matched_chunk_ids",
         "top1_score",
         "top1_preview",
     ]
+    for k in eval_topks:
+        fieldnames.append(f"hit_at_{k}")
     with output_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -595,41 +692,46 @@ def write_retrieval_eval_csv(run_dir: Path, runs: list[dict]) -> None:
             writer.writerow(row)
 
 
-def write_retrieval_eval_md(run_dir: Path, runs: list[dict]) -> None:
+def write_retrieval_eval_md(run_dir: Path, runs: list[dict], eval_topks: list[int]) -> None:
     lines = [
         "# Retrieval Evaluation",
         "",
         f"- Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "- Metric: Top-5 rerank preview matched against provided gold chunk.",
+        "- Metric: strict chunk-id matching against the fixed reference chunks file.",
         "",
         "## Per-Run Metrics",
         "",
-        "| Tag | Hit@1 | Hit@5 | Questions Evaluated |",
-        "| --- | ---: | ---: | ---: |",
     ]
+    header = "| Tag | Questions | " + " | ".join([f"Hit@{k} (count/rate)" for k in eval_topks]) + " |"
+    sep = "| --- | ---: | " + " | ".join(["---:"] * len(eval_topks)) + " |"
+    lines.append(header)
+    lines.append(sep)
     for run in runs:
-        evaluated = len(run.get("retrieval_eval", []))
-        h1 = run.get("retrieval_hit_at_1")
-        h5 = run.get("retrieval_hit_at_5")
-        lines.append(
-            f"| {run['tag']} | "
-            f"{(f'{h1:.3f}' if h1 is not None else 'n/a')} | "
-            f"{(f'{h5:.3f}' if h5 is not None else 'n/a')} | "
-            f"{evaluated} |"
-        )
+        evaluated = run.get("retrieval_eval_total", len(run.get("retrieval_eval", [])))
+        hit_counts = run.get("retrieval_hit_counts", {})
+        hit_rates = run.get("retrieval_hit_rates", {})
+        metric_cells = []
+        for k in eval_topks:
+            count = hit_counts.get(str(k), 0)
+            rate = hit_rates.get(str(k))
+            rate_txt = f"{rate:.3f}" if rate is not None else "n/a"
+            metric_cells.append(f"{count}/{evaluated} ({rate_txt})")
+        lines.append(f"| {run['tag']} | {evaluated} | " + " | ".join(metric_cells) + " |")
 
     lines.extend(["", "## Per-Question Top1 View", ""])
     for run in runs:
         lines.append(f"### {run['tag']}")
         lines.append("")
-        lines.append("| Q | Hit@1 | Top1 Score | Top1 Preview |")
-        lines.append("| ---: | :---: | ---: | --- |")
+        top1_key = f"hit_at_{eval_topks[0]}"
+        lines.append(f"| Q | {top1_key} | Top1 Score | Top1 Matched Chunk IDs | Top1 Preview |")
+        lines.append("| ---: | :---: | ---: | --- | --- |")
         for item in run.get("retrieval_eval", []):
             score = item.get("top1_score")
             lines.append(
                 f"| {item.get('q_id', '')} | "
-                f"{'✅' if item.get('hit_at_1') == 1 else '❌'} | "
+                f"{'✅' if item.get(top1_key) == 1 else '❌'} | "
                 f"{(f'{score:.4f}' if score is not None else '')} | "
+                f"{item.get('top1_matched_chunk_ids', '')} | "
                 f"{item.get('top1_preview', '')} |"
             )
         lines.append("")
@@ -809,6 +911,9 @@ def main() -> None:
     project_root = args.project_root.resolve()
     question_file = resolve_path(project_root, args.question_file).resolve()
     gold_file = resolve_path(project_root, args.gold_file).resolve()
+    gold_chunks_file = resolve_path(project_root, args.gold_chunks_file).resolve()
+    eval_topks = parse_eval_topks(args.eval_topk)
+    max_eval_k = max(eval_topks)
     docs = [resolve_path(project_root, d).resolve() for d in args.docs]
     output_base = resolve_path(project_root, args.output_dir).resolve()
     ollama_info = ensure_ollama(args)
@@ -816,6 +921,7 @@ def main() -> None:
     if not question_file.exists():
         raise FileNotFoundError(f"Question file not found: {question_file}")
     gold_map = load_gold_map(gold_file if gold_file.exists() else None)
+    chunk_catalog = load_chunk_catalog(gold_chunks_file if gold_chunks_file.exists() else None)
     if not docs:
         raise ValueError("No doc files provided.")
 
@@ -829,7 +935,10 @@ def main() -> None:
     print(f"[INFO] Project root: {project_root}", flush=True)
     print(f"[INFO] Question file: {question_file}", flush=True)
     print(f"[INFO] Gold file: {gold_file if gold_file.exists() else '[missing]'}", flush=True)
+    print(f"[INFO] Gold chunks file: {gold_chunks_file if gold_chunks_file.exists() else '[missing]'}", flush=True)
     print(f"[INFO] Gold entries loaded: {len(gold_map)}", flush=True)
+    print(f"[INFO] Gold chunks loaded: {len(chunk_catalog.get('chunks', []))}", flush=True)
+    print(f"[INFO] Retrieval eval top-k: {eval_topks}", flush=True)
     print(f"[INFO] Output dir: {run_dir}", flush=True)
     print(f"[INFO] Total docs to test: {len(docs)}", flush=True)
     print(f"[INFO] PATH prepended with: {args.ollama_bin_dir.expanduser()}", flush=True)
@@ -881,6 +990,9 @@ def main() -> None:
                 "chunk_summary": "",
                 "error_hint": "",
                 "retrieval_eval": [],
+                "retrieval_eval_total": 0,
+                "retrieval_hit_counts": {},
+                "retrieval_hit_rates": {},
                 "retrieval_hit_at_1": None,
                 "retrieval_hit_at_5": None,
             })
@@ -952,34 +1064,57 @@ def main() -> None:
 
         answers = parse_answers(answer_path)
         retrieval_md_blocks = extract_retrieval_markdown_blocks(log_text)
-        parsed_rerank_blocks = [parse_rerank_rows_from_block(block, top_k=5) for block in retrieval_md_blocks]
+        parsed_rerank_blocks = [parse_rerank_rows_from_block(block) for block in retrieval_md_blocks]
         retrieval_eval_rows = []
         for q_idx, answer_item in enumerate(answers):
             question = answer_item.get("question", "")
             gold = gold_map.get(question, {})
             gold_chunk = str(gold.get("gold_chunk", ""))
+            gold_chunk_ids = list(gold.get("gold_chunk_ids", []))
             expected_answer = str(gold.get("expected_answer", ""))
             rerank_rows = parsed_rerank_blocks[q_idx]["rerank_rows"] if q_idx < len(parsed_rerank_blocks) else []
+            rerank_rows = rerank_rows[:max_eval_k]
+            hit_map = {k: 0 for k in eval_topks}
+            top1_matched_chunk_ids = []
+
+            if rerank_rows and gold_chunk_ids and chunk_catalog.get("chunks"):
+                for row in rerank_rows:
+                    row["matched_chunk_ids"] = match_preview_to_chunk_ids(row.get("preview", ""), chunk_catalog)
+                top1_matched_chunk_ids = rerank_rows[0].get("matched_chunk_ids", [])
+                for k in eval_topks:
+                    considered = rerank_rows[:k]
+                    hit_map[k] = 1 if any(
+                        any(cid in gold_chunk_ids for cid in row.get("matched_chunk_ids", []))
+                        for row in considered
+                    ) else 0
+
             top1 = rerank_rows[0] if rerank_rows else None
-            hit_at_1 = 1 if (top1 and preview_matches_gold(top1["preview"], gold_chunk)) else 0
-            hit_at_5 = 1 if any(preview_matches_gold(row["preview"], gold_chunk) for row in rerank_rows) else 0
-            retrieval_eval_rows.append(
-                {
-                    "q_id": answer_item.get("q_id", q_idx + 1),
-                    "question": question,
-                    "gold_chunk": gold_chunk,
-                    "expected_answer": expected_answer,
-                    "hit_at_1": hit_at_1,
-                    "hit_at_5": hit_at_5,
-                    "top1_score": top1.get("score") if top1 else None,
-                    "top1_preview": top1.get("preview", "") if top1 else "",
-                }
-            )
-        retrieval_hit_at_1 = None
-        retrieval_hit_at_5 = None
+            row = {
+                "q_id": answer_item.get("q_id", q_idx + 1),
+                "question": question,
+                "gold_chunk_ids": "|".join(str(cid) for cid in gold_chunk_ids),
+                "gold_chunk": gold_chunk,
+                "expected_answer": expected_answer,
+                "top1_matched_chunk_ids": "|".join(str(cid) for cid in top1_matched_chunk_ids),
+                "top1_score": top1.get("score") if top1 else None,
+                "top1_preview": top1.get("preview", "") if top1 else "",
+            }
+            for k in eval_topks:
+                row[f"hit_at_{k}"] = hit_map.get(k, 0)
+            retrieval_eval_rows.append(row)
+
+        retrieval_hit_counts = {str(k): 0 for k in eval_topks}
+        retrieval_hit_rates = {str(k): None for k in eval_topks}
         if retrieval_eval_rows:
-            retrieval_hit_at_1 = sum(item["hit_at_1"] for item in retrieval_eval_rows) / len(retrieval_eval_rows)
-            retrieval_hit_at_5 = sum(item["hit_at_5"] for item in retrieval_eval_rows) / len(retrieval_eval_rows)
+            total_eval = len(retrieval_eval_rows)
+            for k in eval_topks:
+                key = f"hit_at_{k}"
+                hit_count = sum(int(item.get(key, 0)) for item in retrieval_eval_rows)
+                retrieval_hit_counts[str(k)] = hit_count
+                retrieval_hit_rates[str(k)] = hit_count / total_eval
+
+        retrieval_hit_at_1 = retrieval_hit_rates.get("1")
+        retrieval_hit_at_5 = retrieval_hit_rates.get("5")
 
         runs.append({
             "tag": tag,
@@ -1007,16 +1142,19 @@ def main() -> None:
             "chunk_summary": chunk_summary,
             "error_hint": error_hint,
             "retrieval_eval": retrieval_eval_rows,
+            "retrieval_eval_total": len(retrieval_eval_rows),
+            "retrieval_hit_counts": retrieval_hit_counts,
+            "retrieval_hit_rates": retrieval_hit_rates,
             "retrieval_hit_at_1": retrieval_hit_at_1,
             "retrieval_hit_at_5": retrieval_hit_at_5,
         })
 
-    write_summary_md(run_dir, question_file, runs)
+    write_summary_md(run_dir, question_file, runs, eval_topks)
     write_comparison_csv(run_dir, runs)
     write_retrieval_trace_md(run_dir, runs)
     write_retrieval_full_md(run_dir, runs)
-    write_retrieval_eval_csv(run_dir, runs)
-    write_retrieval_eval_md(run_dir, runs)
+    write_retrieval_eval_csv(run_dir, runs, eval_topks)
+    write_retrieval_eval_md(run_dir, runs, eval_topks)
     (run_dir / "summary.json").write_text(json.dumps(runs, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print("[INFO] Experiment done.", flush=True)
