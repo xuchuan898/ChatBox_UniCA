@@ -12,25 +12,15 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
-
-DEFAULT_PATH_CONFIGS = {
-    "current": {"weight_vec": 1.25, "weight_bm25": 0.75},
-    "equal": {"weight_vec": 1.0, "weight_bm25": 1.0},
-    "vec_only": {"weight_vec": 1.0, "weight_bm25": 0.0},
-    "bm25_only": {"weight_vec": 0.0, "weight_bm25": 1.0},
-    "vec_heavy": {"weight_vec": 1.5, "weight_bm25": 0.5},
-    "bm25_heavy": {"weight_vec": 0.75, "weight_bm25": 1.25},
-}
-
-DEFAULT_VARIANT_MODES = ["primary_only", "mapped_current", "mapped_expanded"]
-DEFAULT_VARIANT_WEIGHTS = [1.0, 0.85, 0.7, 0.5]
+DEFAULT_SWEEP_VALUES = [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run retrieval-focused interaction ablation on one document: "
-            "path weights x variant mode x secondary variant weight."
+            "Run retrieval-focused single-variable ablations on one document: "
+            "bm25:vector ratio sweep, retrieval translation ratio sweep, and rerank alpha sweep. "
+            "Non-target variables are fixed to 0.5 by default."
         )
     )
     parser.add_argument(
@@ -52,39 +42,83 @@ def parse_args() -> argparse.Namespace:
         help="Question file path.",
     )
     parser.add_argument(
-        "--path-configs",
-        type=str,
-        nargs="*",
-        default=["current", "equal", "vec_heavy", "bm25_heavy"],
-        help="Path-weight presets to include in interaction runs.",
+        "--gold-file",
+        type=Path,
+        default=Path("questions/questions_batch_advanced_en_fr_gold.json"),
+        help="Gold file with expected answers and strict gold chunk ids.",
     )
     parser.add_argument(
-        "--extra-path-config",
-        type=str,
-        nargs="*",
-        default=[],
-        help="Extra path config in 'name:weight_vec:weight_bm25' format.",
+        "--gold-chunks-file",
+        type=Path,
+        default=None,
+        help=(
+            "Reference chunks jsonl for strict retrieval evaluation by chunk id. "
+            "If omitted, uses current run output: answers/master_md.chunks.jsonl."
+        ),
     )
     parser.add_argument(
-        "--variant-modes",
-        type=str,
-        nargs="*",
-        default=DEFAULT_VARIANT_MODES,
-        choices=["primary_only", "mapped_current", "mapped_expanded"],
-        help="Variant generation modes to include.",
-    )
-    parser.add_argument(
-        "--variant-weights",
+        "--bm25-ratios",
         type=float,
         nargs="*",
-        default=DEFAULT_VARIANT_WEIGHTS,
-        help="Secondary variant weights used for non-primary_only modes.",
+        default=DEFAULT_SWEEP_VALUES,
+        help="BM25 ratio values in [0,1] for bm25:vector ratio sweep (w_vec=1-r, w_bm25=r).",
+    )
+    parser.add_argument(
+        "--translation-ratios",
+        type=float,
+        nargs="*",
+        default=DEFAULT_SWEEP_VALUES,
+        help="Retrieval-side translation ratio values in [0,1] (secondary_variant_weight sweep).",
+    )
+    parser.add_argument(
+        "--rerank-alphas",
+        type=float,
+        nargs="*",
+        default=DEFAULT_SWEEP_VALUES,
+        help="Rerank translation fusion alpha values in [0,1] (alpha*src + (1-alpha)*translated).",
+    )
+    parser.add_argument(
+        "--fixed-bm25-ratio",
+        type=float,
+        default=0.5,
+        help="Fixed bm25 ratio used when sweeping other variables.",
+    )
+    parser.add_argument(
+        "--fixed-translation-ratio",
+        type=float,
+        default=0.5,
+        help="Fixed retrieval translation ratio used when sweeping other variables.",
+    )
+    parser.add_argument(
+        "--fixed-rerank-alpha",
+        type=float,
+        default=0.5,
+        help="Fixed rerank alpha used when sweeping other variables.",
+    )
+    parser.add_argument(
+        "--variant-mode",
+        type=str,
+        default="mapped_current",
+        choices=["primary_only", "mapped_current", "mapped_expanded"],
+        help="Variant generation mode.",
+    )
+    parser.add_argument(
+        "--eval-topk",
+        type=str,
+        default="1,5,8",
+        help="Comma-separated top-k values for strict retrieval evaluation.",
+    )
+    parser.add_argument(
+        "--dynamic-topk-ratio",
+        type=float,
+        default=0.90,
+        help="Dynamic top-k ratio. Keep candidates with score >= ratio * max_score (0 < ratio <= 1).",
     )
     parser.add_argument(
         "--top-k",
         type=int,
         default=5,
-        help="Top-k rows to keep for base/rerank output (default: 5).",
+        help="Top-k rows shown in details markdown (default: 5).",
     )
     parser.add_argument(
         "--output-dir",
@@ -126,6 +160,32 @@ def parse_args() -> argparse.Namespace:
 
 def resolve_path(project_root: Path, path: Path) -> Path:
     return path if path.is_absolute() else (project_root / path)
+
+
+def parse_eval_topks(value: str) -> list[int]:
+    topks = []
+    for token in (value or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        k = int(token)
+        if k <= 0:
+            raise ValueError(f"Invalid top-k value: {k}. Must be > 0.")
+        topks.append(k)
+    unique_sorted = sorted(set(topks))
+    if not unique_sorted:
+        raise ValueError("No valid top-k values provided.")
+    return unique_sorted
+
+
+def _validate_ratio_list(name: str, values: list[float]) -> list[float]:
+    if not values:
+        raise ValueError(f"--{name} must not be empty.")
+    cleaned = sorted(set(round(float(v), 4) for v in values))
+    for v in cleaned:
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(f"--{name} values must be in [0,1], got: {v}")
+    return cleaned
 
 
 def ollama_is_ready(ollama_host: str) -> bool:
@@ -227,59 +287,98 @@ def detect_question_language(text: str) -> str:
     return "fr" if fr_score >= en_score + 1 else "en"
 
 
-def parse_extra_path_config(raw: str) -> tuple[str, float, float]:
-    parts = raw.split(":")
-    if len(parts) != 3:
-        raise ValueError(
-            f"Invalid --extra-path-config format: {raw!r}. Expected name:weight_vec:weight_bm25"
-        )
-    name = parts[0].strip()
-    if not name:
-        raise ValueError(f"Invalid config name in --extra-path-config: {raw!r}")
-    return name, float(parts[1]), float(parts[2])
-
-
 def _weight_slug(value: float) -> str:
     return f"{value:.2f}".replace(".", "p")
 
 
 def build_run_plan(args: argparse.Namespace) -> list[dict]:
-    path_configs = []
-    for name in args.path_configs:
-        if name not in DEFAULT_PATH_CONFIGS:
-            raise ValueError(f"Unknown path config name: {name}. Available: {sorted(DEFAULT_PATH_CONFIGS)}")
-        cfg = DEFAULT_PATH_CONFIGS[name].copy()
-        cfg["path_config"] = name
-        path_configs.append(cfg)
+    bm25_ratios = _validate_ratio_list("bm25-ratios", args.bm25_ratios)
+    translation_ratios = _validate_ratio_list("translation-ratios", args.translation_ratios)
+    rerank_alphas = _validate_ratio_list("rerank-alphas", args.rerank_alphas)
 
-    for raw in args.extra_path_config:
-        name, weight_vec, weight_bm25 = parse_extra_path_config(raw)
-        path_configs.append(
-            {"path_config": name, "weight_vec": weight_vec, "weight_bm25": weight_bm25}
-        )
-
-    variant_weights = list(dict.fromkeys(args.variant_weights))
-    if not variant_weights:
-        raise ValueError("--variant-weights must not be empty.")
+    fixed_bm25_ratio = round(float(args.fixed_bm25_ratio), 4)
+    fixed_translation_ratio = round(float(args.fixed_translation_ratio), 4)
+    fixed_rerank_alpha = round(float(args.fixed_rerank_alpha), 4)
+    for name, v in (
+        ("fixed-bm25-ratio", fixed_bm25_ratio),
+        ("fixed-translation-ratio", fixed_translation_ratio),
+        ("fixed-rerank-alpha", fixed_rerank_alpha),
+    ):
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(f"--{name} must be in [0,1], got: {v}")
 
     plan = []
-    for path_cfg in path_configs:
-        for variant_mode in args.variant_modes:
-            weights_for_mode = [1.0] if variant_mode == "primary_only" else variant_weights
-            for svw in weights_for_mode:
-                run_id = (
-                    f"{path_cfg['path_config']}__{variant_mode}__svw{_weight_slug(svw)}"
-                )
-                plan.append(
-                    {
-                        "run_id": run_id,
-                        "path_config": path_cfg["path_config"],
-                        "weight_vec": path_cfg["weight_vec"],
-                        "weight_bm25": path_cfg["weight_bm25"],
-                        "variant_mode": variant_mode,
-                        "secondary_variant_weight": float(svw),
-                    }
-                )
+    # A) Sweep bm25:vector ratio, fix retrieval translation ratio + rerank alpha.
+    for bm25_ratio in bm25_ratios:
+        tr = fixed_translation_ratio
+        alpha = fixed_rerank_alpha
+        svw = 1.0 if args.variant_mode == "primary_only" else tr
+        run_id = (
+            f"bm25_ratio__r{_weight_slug(bm25_ratio)}"
+            f"__tr{_weight_slug(tr)}__ra{_weight_slug(alpha)}"
+        )
+        plan.append(
+            {
+                "run_id": run_id,
+                "sweep_group": "bm25_ratio",
+                "sweep_var": "bm25_ratio",
+                "sweep_value": float(bm25_ratio),
+                "weight_vec": float(1.0 - bm25_ratio),
+                "weight_bm25": float(bm25_ratio),
+                "variant_mode": args.variant_mode,
+                "secondary_variant_weight": float(svw),
+                "translation_ratio": float(tr),
+                "rerank_alpha": float(alpha),
+            }
+        )
+
+    # B) Sweep retrieval translation ratio, fix bm25 ratio + rerank alpha.
+    for tr in translation_ratios:
+        bm25_ratio = fixed_bm25_ratio
+        alpha = fixed_rerank_alpha
+        svw = 1.0 if args.variant_mode == "primary_only" else tr
+        run_id = (
+            f"translation_ratio__r{_weight_slug(tr)}"
+            f"__bm25{_weight_slug(bm25_ratio)}__ra{_weight_slug(alpha)}"
+        )
+        plan.append(
+            {
+                "run_id": run_id,
+                "sweep_group": "translation_ratio",
+                "sweep_var": "translation_ratio",
+                "sweep_value": float(tr),
+                "weight_vec": float(1.0 - bm25_ratio),
+                "weight_bm25": float(bm25_ratio),
+                "variant_mode": args.variant_mode,
+                "secondary_variant_weight": float(svw),
+                "translation_ratio": float(tr),
+                "rerank_alpha": float(alpha),
+            }
+        )
+
+    # C) Sweep rerank translation alpha, fix bm25 ratio + retrieval translation ratio.
+    for alpha in rerank_alphas:
+        bm25_ratio = fixed_bm25_ratio
+        tr = fixed_translation_ratio
+        svw = 1.0 if args.variant_mode == "primary_only" else tr
+        run_id = (
+            f"rerank_alpha__r{_weight_slug(alpha)}"
+            f"__bm25{_weight_slug(bm25_ratio)}__tr{_weight_slug(tr)}"
+        )
+        plan.append(
+            {
+                "run_id": run_id,
+                "sweep_group": "rerank_alpha",
+                "sweep_var": "rerank_alpha",
+                "sweep_value": float(alpha),
+                "weight_vec": float(1.0 - bm25_ratio),
+                "weight_bm25": float(bm25_ratio),
+                "variant_mode": args.variant_mode,
+                "secondary_variant_weight": float(svw),
+                "translation_ratio": float(tr),
+                "rerank_alpha": float(alpha),
+            }
+        )
     return plan
 
 
@@ -327,7 +426,7 @@ def _parse_table_row(row: str) -> list[str]:
     return parts
 
 
-def parse_retrieval_block(block: str, top_k: int = 5) -> dict:
+def parse_retrieval_block(block: str) -> dict:
     question = ""
     section = ""
     base_rows = []
@@ -377,9 +476,121 @@ def parse_retrieval_block(block: str, top_k: int = 5) -> dict:
 
     return {
         "question": question,
-        "base_rows": base_rows[:top_k],
-        "rerank_rows": rerank_rows[:top_k],
+        "base_rows": base_rows,
+        "rerank_rows": rerank_rows,
     }
+
+
+def load_gold_map(path: Path | None) -> dict:
+    if not path or not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mapping = {}
+    for item in payload.get("items", []):
+        question = str(item.get("question", "")).strip()
+        if not question:
+            continue
+        chunk_ids = item.get("gold_chunk_ids")
+        if chunk_ids is None:
+            chunk_id = item.get("gold_chunk_id")
+            chunk_ids = [chunk_id] if chunk_id is not None else []
+        normalized_chunk_ids = []
+        for cid in chunk_ids:
+            try:
+                normalized_chunk_ids.append(int(cid))
+            except (TypeError, ValueError):
+                continue
+        mapping[question] = {
+            "expected_answer": item.get("expected_answer", ""),
+            "gold_chunk": item.get("gold_chunk", ""),
+            "gold_chunk_ids": normalized_chunk_ids,
+            "lang": item.get("lang", ""),
+            "qid": item.get("qid", ""),
+        }
+    return mapping
+
+
+def _normalize_for_match(text: str) -> str:
+    lowered = text.lower()
+    lowered = re.sub(r"[^a-z0-9àâçéèêëîïôûùüÿœ\s]", " ", lowered)
+    lowered = re.sub(r"\s+", " ", lowered).strip()
+    return lowered
+
+
+def extract_context_label(text: str) -> str:
+    if not text:
+        return ""
+    match = re.search(r"\[Context:\s*(.*?)\]", text, flags=re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def load_chunk_catalog(path: Path | None) -> dict:
+    catalog = {
+        "path": str(path) if path else "",
+        "chunks": [],
+        "by_context": {},
+    }
+    if not path or not path.exists():
+        return catalog
+
+    chunks = []
+    by_context = {}
+    with path.open("r", encoding="utf-8", errors="ignore") as f:
+        for idx, line in enumerate(f):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            content = str(rec.get("content", ""))
+            context = extract_context_label(content)
+            norm_content = _normalize_for_match(content)
+            norm_context = _normalize_for_match(context)
+            item = {
+                "chunk_id": idx,
+                "content": content,
+                "norm_content": norm_content,
+                "context": context,
+                "norm_context": norm_context,
+                "chunk_type": rec.get("chunk_type", ""),
+            }
+            chunks.append(item)
+            if norm_context:
+                by_context.setdefault(norm_context, []).append(idx)
+
+    catalog["chunks"] = chunks
+    catalog["by_context"] = by_context
+    return catalog
+
+
+def match_preview_to_chunk_ids(preview: str, chunk_catalog: dict) -> list[int]:
+    if not preview or not chunk_catalog.get("chunks"):
+        return []
+
+    context = extract_context_label(preview)
+    norm_context = _normalize_for_match(context)
+    norm_preview = _normalize_for_match(preview.replace("...", " "))
+    if len(norm_preview) < 8:
+        return []
+
+    chunks = chunk_catalog.get("chunks", [])
+    by_context = chunk_catalog.get("by_context", {})
+
+    if norm_context:
+        context_ids = by_context.get(norm_context, [])
+        if len(context_ids) == 1:
+            return context_ids
+        if context_ids:
+            narrowed = [cid for cid in context_ids if norm_preview in chunks[cid]["norm_content"]]
+            if len(narrowed) == 1:
+                return narrowed
+            if narrowed:
+                return sorted(set(narrowed))
+
+    matched = [c["chunk_id"] for c in chunks if norm_preview in c["norm_content"]]
+    return sorted(set(matched))
 
 
 def summarize_run_rows(rows: list[dict]) -> dict:
@@ -396,6 +607,11 @@ def summarize_run_rows(rows: list[dict]) -> dict:
         "avg_rerank_top1_score": _safe_mean(rerank_top1_scores),
         "avg_rerank_margin_top1_top2": _safe_mean(rerank_margin),
         "unique_rerank_top1_chunks": len({r["rerank_top1_preview"] for r in rows if r["rerank_top1_preview"]}),
+        "hit_at_1_count": sum(int(r.get("hit_at_1", 0)) for r in rows),
+        "hit_at_5_count": sum(int(r.get("hit_at_5", 0)) for r in rows),
+        "hit_at_8_count": sum(int(r.get("hit_at_8", 0)) for r in rows),
+        "hit_at_dynamic_k_count": sum(int(r.get("hit_at_dynamic_k", 0)) for r in rows),
+        "avg_dynamic_k": _safe_mean([float(r.get("dynamic_k", 0)) for r in rows]) if rows else 0.0,
     }
 
 
@@ -422,6 +638,8 @@ def build_markdown_summary(
     run_summaries: list[dict],
     question_rows: list[dict],
     top_k: int,
+    eval_topks: list[int],
+    dynamic_topk_ratio: float,
 ) -> None:
     lines = [
         "# Retrieval Interaction Ablation Summary",
@@ -431,17 +649,18 @@ def build_markdown_summary(
         f"- Question file: {question_file}",
         f"- Total runs: {len(run_summaries)}",
         f"- Questions per run: {len({r['q_id'] for r in question_rows}) if question_rows else 0}",
+        f"- Evaluation top-k: {eval_topks}",
+        f"- Dynamic top-k ratio: {dynamic_topk_ratio:.2f}",
         "",
         "## Run Configs",
         "",
-        "| Run ID | Path Config | Variant Mode | Weight Ratio (vec:bm25) | Secondary Variant Weight |",
-        "| --- | --- | --- | --- | ---: |",
+        "| Run ID | Sweep | Value | Variant Mode | w_vec | w_bm25 | Translation Ratio | Rerank Alpha |",
+        "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |",
     ]
     for row in run_summaries:
-        ratio = f"{row['weight_vec']:.2f}:{row['weight_bm25']:.2f}"
         lines.append(
-            f"| {row['run_id']} | {row['path_config']} | {row['variant_mode']} | "
-            f"{ratio} | {row['secondary_variant_weight']:.2f} |"
+            f"| {row['run_id']} | {row['sweep_group']} | {row['sweep_value']:.2f} | {row['variant_mode']} | "
+            f"{row['weight_vec']:.2f} | {row['weight_bm25']:.2f} | {row['translation_ratio']:.2f} | {row['rerank_alpha']:.2f} |"
         )
 
     lines.extend(
@@ -449,16 +668,18 @@ def build_markdown_summary(
             "",
         "## Run Summary",
         "",
-        "| Run ID | Path Config | Variant Mode | Sec Variant Weight | w_vec | w_bm25 | Avg Rerank Top1 | Avg Margin(1-2) | Top1 Changed vs Baseline |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Run ID | Sweep | Value | Variant Mode | w_vec | w_bm25 | Translation Ratio | Rerank Alpha | Hit@1 | Hit@5 | Hit@8 | Hit@DynamicK | Avg Dynamic-K | Avg Rerank Top1 | Avg Margin(1-2) |",
+        "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for row in run_summaries:
+        q = max(int(row.get("questions", 0)), 1)
         lines.append(
-            f"| {row['run_id']} | {row['path_config']} | {row['variant_mode']} | "
-            f"{row['secondary_variant_weight']:.2f} | {row['weight_vec']:.2f} | {row['weight_bm25']:.2f} | "
-            f"{row['avg_rerank_top1_score']:.4f} | {row['avg_rerank_margin_top1_top2']:.4f} | "
-            f"{row['top1_changed_rate_vs_baseline']:.4f} |"
+            f"| {row['run_id']} | {row['sweep_group']} | {row['sweep_value']:.2f} | {row['variant_mode']} | "
+            f"{row['weight_vec']:.2f} | {row['weight_bm25']:.2f} | {row['translation_ratio']:.2f} | {row['rerank_alpha']:.2f} | "
+            f"{row.get('hit_at_1_count', 0)}/{q} | {row.get('hit_at_5_count', 0)}/{q} | {row.get('hit_at_8_count', 0)}/{q} | "
+            f"{row.get('hit_at_dynamic_k_count', 0)}/{q} | {row.get('avg_dynamic_k', 0.0):.2f} | "
+            f"{row['avg_rerank_top1_score']:.4f} | {row['avg_rerank_margin_top1_top2']:.4f} |"
         )
 
     lines.extend(
@@ -466,10 +687,11 @@ def build_markdown_summary(
             "",
             "## Artifacts",
             "",
-            f"- Retrieval details in `runs.json` keep Top-{top_k} for base and rerank.",
+            f"- Retrieval details in `runs.json` keep full base/rerank rows (details.md shows Top-{top_k}).",
             "- `interaction_summary.csv`: interaction-level aggregate metrics.",
             "- `question_level.csv`: per-question top retrieval signals.",
             "- `details.md`: per-question/per-run variants and rerank Top-k tables.",
+            "- `plots/`: line charts for bm25_ratio / translation_ratio / rerank_alpha sweeps.",
             "",
         ]
     )
@@ -493,8 +715,10 @@ def build_markdown_details(
     sorted_runs = sorted(
         run_payloads,
         key=lambda r: (
-            r["path_config"],
+            r["sweep_group"],
+            r["sweep_value"],
             r["variant_mode"],
+            r["weight_bm25"],
             r["secondary_variant_weight"],
         ),
     )
@@ -511,12 +735,13 @@ def build_markdown_details(
             block = retrieval_blocks[q_idx - 1] if q_idx - 1 < len(retrieval_blocks) else {}
             event = variant_events[q_idx - 1] if q_idx - 1 < len(variant_events) else {}
             variants = event.get("variants", [])
-            rerank_rows = block.get("rerank_rows", [])
+            rerank_rows = block.get("rerank_rows", [])[:top_k]
 
             lines.append(
                 f"### {run['run_id']} "
-                f"(path={run['path_config']}, mode={run['variant_mode']}, "
-                f"svw={run['secondary_variant_weight']:.2f})"
+                f"(sweep={run['sweep_group']}={run['sweep_value']:.2f}, mode={run['variant_mode']}, "
+                f"bm25={run['weight_bm25']:.2f}, tr={run['translation_ratio']:.2f}, "
+                f"alpha={run['rerank_alpha']:.2f}, svw={run['secondary_variant_weight']:.2f})"
             )
             lines.append("")
             lines.append(
@@ -550,11 +775,84 @@ def build_markdown_details(
     (run_dir / "details.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def build_line_plots(run_dir: Path, run_summaries: list[dict], dynamic_topk_ratio: float) -> list[str]:
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return []
+
+    plots_dir = run_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    metric_lines = [
+        ("hit_at_1_count", "Hit@1"),
+        ("hit_at_5_count", "Hit@5"),
+        ("hit_at_8_count", "Hit@8"),
+        ("hit_at_dynamic_k_count", f"Hit@DynamicK(r={dynamic_topk_ratio:.2f})"),
+    ]
+    sweep_titles = {
+        "bm25_ratio": ("BM25 Ratio", "bm25_ratio"),
+        "translation_ratio": ("Translation Ratio", "translation_ratio"),
+        "rerank_alpha": ("Rerank Alpha", "rerank_alpha"),
+    }
+
+    generated = []
+    for sweep_group, (xlabel, slug) in sweep_titles.items():
+        rows = [r for r in run_summaries if r.get("sweep_group") == sweep_group]
+        if not rows:
+            continue
+        rows = sorted(rows, key=lambda r: float(r.get("sweep_value", 0.0)))
+
+        # One chart per sweep with four metric lines.
+        fig, ax = plt.subplots(figsize=(9, 5))
+        xs = [float(r.get("sweep_value", 0.0)) for r in rows]
+        for metric_key, label in metric_lines:
+            ys = [
+                (float(r.get(metric_key, 0.0)) / max(int(r.get("questions", 0)), 1))
+                for r in rows
+            ]
+            ax.plot(xs, ys, marker="o", label=label)
+        ax.set_title(f"Retrieval Metrics vs {xlabel}")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("Rate")
+        ax.set_ylim(0.0, 1.05)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best", fontsize=8)
+        out = plots_dir / f"metrics_vs_{slug}.png"
+        fig.tight_layout()
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        generated.append(str(out))
+
+        fig, ax = plt.subplots(figsize=(9, 5))
+        ys_dyn = [float(r.get("avg_dynamic_k", 0.0)) for r in rows]
+        ax.plot(xs, ys_dyn, marker="o", label="Avg Dynamic-K")
+        ax.set_title(f"Average Dynamic-K vs {xlabel} (r={dynamic_topk_ratio:.2f})")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("Average Dynamic-K")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best", fontsize=8)
+        out = plots_dir / f"avg_dynamic_k_vs_{slug}.png"
+        fig.tight_layout()
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        generated.append(str(out))
+
+    return generated
+
+
 def main() -> None:
     args = parse_args()
     project_root = args.project_root.resolve()
     doc_file = resolve_path(project_root, args.doc_file).resolve()
     question_file = resolve_path(project_root, args.question_file).resolve()
+    gold_file = resolve_path(project_root, args.gold_file).resolve()
+    gold_chunks_file = resolve_path(project_root, args.gold_chunks_file).resolve() if args.gold_chunks_file else None
+    eval_topks = parse_eval_topks(args.eval_topk)
+    max_eval_k = max(eval_topks)
+    dynamic_topk_ratio = float(args.dynamic_topk_ratio)
+    if not (0.0 < dynamic_topk_ratio <= 1.0):
+        raise ValueError(f"--dynamic-topk-ratio must be in (0, 1], got: {dynamic_topk_ratio}")
     output_base = resolve_path(project_root, args.output_dir).resolve()
     chat_box_path = project_root / "chat_box.py"
 
@@ -562,15 +860,16 @@ def main() -> None:
         raise FileNotFoundError(f"Doc file not found: {doc_file}")
     if not question_file.exists():
         raise FileNotFoundError(f"Question file not found: {question_file}")
-    if not chat_box_path.exists():
-        raise FileNotFoundError(f"chat_box.py not found under project root: {chat_box_path}")
     if args.top_k <= 0:
         raise ValueError("--top-k must be > 0")
+    if not chat_box_path.exists():
+        raise FileNotFoundError(f"chat_box.py not found under project root: {chat_box_path}")
 
     plan = build_run_plan(args)
     questions = load_questions(question_file)
     if not questions:
         raise ValueError(f"No valid questions loaded from: {question_file}")
+    gold_map = load_gold_map(gold_file if gold_file.exists() else None)
 
     ollama_info = ensure_ollama(args)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -580,10 +879,28 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
     answers_dir.mkdir(parents=True, exist_ok=True)
+    default_gold_chunks_file = answers_dir / "master_md.chunks.jsonl"
+    chunk_catalog = {}
+    chunk_catalog_source = ""
+    if gold_chunks_file and gold_chunks_file.exists():
+        chunk_catalog = load_chunk_catalog(gold_chunks_file)
+        chunk_catalog_source = str(gold_chunks_file)
 
     print(f"[INFO] Project root: {project_root}", flush=True)
     print(f"[INFO] Doc file: {doc_file}", flush=True)
     print(f"[INFO] Question file: {question_file}", flush=True)
+    print(f"[INFO] Gold file: {gold_file if gold_file.exists() else '[missing]'}", flush=True)
+    if gold_chunks_file:
+        print(f"[INFO] Gold chunks file: {gold_chunks_file if gold_chunks_file.exists() else '[missing]'}", flush=True)
+    else:
+        print(f"[INFO] Gold chunks file: [auto] {default_gold_chunks_file}", flush=True)
+    print(f"[INFO] Evaluation top-k: {eval_topks}", flush=True)
+    print(f"[INFO] Dynamic top-k ratio: {dynamic_topk_ratio:.2f}", flush=True)
+    print(
+        f"[INFO] Fixed non-target values: bm25_ratio={args.fixed_bm25_ratio:.2f}, "
+        f"translation_ratio={args.fixed_translation_ratio:.2f}, rerank_alpha={args.fixed_rerank_alpha:.2f}",
+        flush=True,
+    )
     print(f"[INFO] Interaction runs planned: {len(plan)}", flush=True)
     print(f"[INFO] Output dir: {run_dir}", flush=True)
     print(f"[INFO] Ollama host: {args.ollama_host}", flush=True)
@@ -599,23 +916,27 @@ def main() -> None:
         run_id_str = item["run_id"]
         log_path = logs_dir / f"{run_id_str}.log"
         answer_path = answers_dir / f"{run_id_str}.answers.txt"
+        chunk_path = answers_dir / "master_md.chunks.jsonl"
         cmd = [
             args.python_bin,
             str(chat_box_path),
             "--doc-file", str(doc_file),
             "--question-file", str(question_file),
             "--answer-file", str(answer_path),
+            "--save-chunks-file", str(chunk_path),
             "--debug",
             "--weight-vec", str(item["weight_vec"]),
             "--weight-bm25", str(item["weight_bm25"]),
             "--variant-mode", item["variant_mode"],
             "--secondary-variant-weight", str(item["secondary_variant_weight"]),
+            "--rerank-alpha", str(item["rerank_alpha"]),
         ]
 
         print(
             f"[RUN {idx}/{len(plan)}] {run_id_str} "
             f"(vec={item['weight_vec']}, bm25={item['weight_bm25']}, "
-            f"mode={item['variant_mode']}, svw={item['secondary_variant_weight']})",
+            f"mode={item['variant_mode']}, tr={item['translation_ratio']}, "
+            f"alpha={item['rerank_alpha']}, svw={item['secondary_variant_weight']})",
             flush=True,
         )
         start = time.perf_counter()
@@ -636,8 +957,25 @@ def main() -> None:
 
         log_text = log_path.read_text(encoding="utf-8", errors="ignore")
         blocks = extract_retrieval_markdown_blocks(log_text)
-        parsed_blocks = [parse_retrieval_block(block, top_k=args.top_k) for block in blocks]
+        parsed_blocks = [parse_retrieval_block(block) for block in blocks]
         variant_events = extract_query_variant_events(log_text)
+
+        if not chunk_catalog:
+            if gold_chunks_file and gold_chunks_file.exists():
+                chunk_catalog = load_chunk_catalog(gold_chunks_file)
+                chunk_catalog_source = str(gold_chunks_file)
+            elif chunk_path.exists():
+                chunk_catalog = load_chunk_catalog(chunk_path)
+                chunk_catalog_source = str(chunk_path)
+            elif default_gold_chunks_file.exists():
+                chunk_catalog = load_chunk_catalog(default_gold_chunks_file)
+                chunk_catalog_source = str(default_gold_chunks_file)
+            if chunk_catalog:
+                print(
+                    f"[RUN {idx}/{len(plan)}] Loaded strict eval chunk catalog from: {chunk_catalog_source} "
+                    f"(chunks={len(chunk_catalog.get('chunks', []))})",
+                    flush=True,
+                )
 
         per_run_rows = []
         for q_idx, question in enumerate(questions, start=1):
@@ -654,16 +992,54 @@ def main() -> None:
             if rerank_top1 and rerank_top2:
                 margin = round(rerank_top1["score"] - rerank_top2["score"], 4)
 
+            gold = gold_map.get(question, {})
+            gold_chunk = str(gold.get("gold_chunk", ""))
+            gold_chunk_ids = list(gold.get("gold_chunk_ids", []))
+
+            eval_rows = rerank_rows[:max_eval_k]
+            hit_map = {k: 0 for k in eval_topks}
+            top1_matched_chunk_ids = []
+            dynamic_k = 0
+            dynamic_hit = 0
+            if eval_rows and gold_chunk_ids and chunk_catalog.get("chunks"):
+                for rr in eval_rows:
+                    rr["matched_chunk_ids"] = match_preview_to_chunk_ids(rr.get("preview", ""), chunk_catalog)
+                top1_matched_chunk_ids = eval_rows[0].get("matched_chunk_ids", [])
+                for k in eval_topks:
+                    considered = eval_rows[:k]
+                    hit_map[k] = 1 if any(
+                        any(cid in gold_chunk_ids for cid in rr.get("matched_chunk_ids", []))
+                        for rr in considered
+                    ) else 0
+                max_score = eval_rows[0].get("score")
+                if isinstance(max_score, (int, float)):
+                    threshold = float(max_score) * dynamic_topk_ratio
+                    dynamic_rows = [
+                        rr for rr in eval_rows
+                        if isinstance(rr.get("score"), (int, float)) and float(rr.get("score")) >= threshold
+                    ]
+                    dynamic_k = len(dynamic_rows)
+                    dynamic_hit = 1 if any(
+                        any(cid in gold_chunk_ids for cid in rr.get("matched_chunk_ids", []))
+                        for rr in dynamic_rows
+                    ) else 0
+
             row = {
                 "run_id": run_id_str,
-                "path_config": item["path_config"],
+                "sweep_group": item["sweep_group"],
+                "sweep_var": item["sweep_var"],
+                "sweep_value": item["sweep_value"],
                 "variant_mode": item["variant_mode"],
                 "secondary_variant_weight": item["secondary_variant_weight"],
+                "translation_ratio": item["translation_ratio"],
+                "rerank_alpha": item["rerank_alpha"],
                 "weight_vec": item["weight_vec"],
                 "weight_bm25": item["weight_bm25"],
                 "q_id": q_idx,
                 "lang": lang,
                 "question": question,
+                "gold_chunk_ids": "|".join(str(cid) for cid in gold_chunk_ids),
+                "gold_chunk": gold_chunk,
                 "variants": " || ".join(variant_event.get("variants", [])),
                 "base_top1_score": base_top1["score"] if base_top1 else None,
                 "base_top1_chunk_type": base_top1["chunk_type"] if base_top1 else "",
@@ -672,7 +1048,16 @@ def main() -> None:
                 "rerank_top1_chunk_type": rerank_top1["chunk_type"] if rerank_top1 else "",
                 "rerank_top1_preview": rerank_top1["preview"] if rerank_top1 else "",
                 "rerank_margin_top1_top2": margin,
+                "top1_matched_chunk_ids": "|".join(str(cid) for cid in top1_matched_chunk_ids),
+                "dynamic_k": dynamic_k,
+                "dynamic_ratio": f"{dynamic_topk_ratio:.4f}",
+                "hit_at_dynamic_k": dynamic_hit,
             }
+            for k in eval_topks:
+                row[f"hit_at_{k}"] = hit_map.get(k, 0)
+            row["hit_at_1"] = hit_map.get(1, row.get("hit_at_1", 0))
+            row["hit_at_5"] = hit_map.get(5, row.get("hit_at_5", 0))
+            row["hit_at_8"] = hit_map.get(8, row.get("hit_at_8", 0))
             per_run_rows.append(row)
             question_level_rows.append(row.copy())
 
@@ -680,9 +1065,13 @@ def main() -> None:
         summary.update(
             {
                 "run_id": run_id_str,
-                "path_config": item["path_config"],
+                "sweep_group": item["sweep_group"],
+                "sweep_var": item["sweep_var"],
+                "sweep_value": item["sweep_value"],
                 "variant_mode": item["variant_mode"],
                 "secondary_variant_weight": item["secondary_variant_weight"],
+                "translation_ratio": item["translation_ratio"],
+                "rerank_alpha": item["rerank_alpha"],
                 "weight_vec": item["weight_vec"],
                 "weight_bm25": item["weight_bm25"],
                 "exit_code": proc.returncode,
@@ -706,33 +1095,12 @@ def main() -> None:
             }
         )
 
-    baseline_id = "current__mapped_current__svw0p85"
-    available_ids = {row["run_id"] for row in interaction_summary_rows}
-    if baseline_id not in available_ids:
-        baseline_id = interaction_summary_rows[0]["run_id"] if interaction_summary_rows else ""
-
-    baseline_rows = [r for r in question_level_rows if r["run_id"] == baseline_id]
-    baseline_by_qid = {r["q_id"]: r for r in baseline_rows}
-    for row in question_level_rows:
-        if row["run_id"] == baseline_id:
-            row["top1_changed_vs_baseline"] = 0
-            continue
-        base = baseline_by_qid.get(row["q_id"])
-        row["top1_changed_vs_baseline"] = (
-            1 if base and row["rerank_top1_preview"] != base["rerank_top1_preview"] else 0
-        )
-
-    if baseline_rows:
-        for summary in interaction_summary_rows:
-            if summary["run_id"] == baseline_id:
-                summary["top1_changed_rate_vs_baseline"] = 0.0
-                continue
-            rows = [r for r in question_level_rows if r["run_id"] == summary["run_id"]]
-            changed = [r["top1_changed_vs_baseline"] for r in rows]
-            summary["top1_changed_rate_vs_baseline"] = round(sum(changed) / len(changed), 4) if changed else 0.0
-    else:
-        for summary in interaction_summary_rows:
-            summary["top1_changed_rate_vs_baseline"] = 0.0
+    for summary in interaction_summary_rows:
+        q = max(int(summary.get("questions", 0)), 1)
+        summary["hit_at_1_rate"] = round(summary.get("hit_at_1_count", 0) / q, 4)
+        summary["hit_at_5_rate"] = round(summary.get("hit_at_5_count", 0) / q, 4)
+        summary["hit_at_8_rate"] = round(summary.get("hit_at_8_count", 0) / q, 4)
+        summary["hit_at_dynamic_k_rate"] = round(summary.get("hit_at_dynamic_k_count", 0) / q, 4)
 
     write_json(
         run_dir / "runs.json",
@@ -740,8 +1108,17 @@ def main() -> None:
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "doc_file": str(doc_file),
             "question_file": str(question_file),
+            "gold_file": str(gold_file),
+            "gold_chunks_file": chunk_catalog_source,
+            "eval_topks": eval_topks,
+            "dynamic_topk_ratio": dynamic_topk_ratio,
+            "bm25_ratios": _validate_ratio_list("bm25-ratios", args.bm25_ratios),
+            "translation_ratios": _validate_ratio_list("translation-ratios", args.translation_ratios),
+            "rerank_alphas": _validate_ratio_list("rerank-alphas", args.rerank_alphas),
+            "fixed_bm25_ratio": args.fixed_bm25_ratio,
+            "fixed_translation_ratio": args.fixed_translation_ratio,
+            "fixed_rerank_alpha": args.fixed_rerank_alpha,
             "top_k": args.top_k,
-            "baseline_run_id": baseline_id,
             "runs": run_payloads,
         },
     )
@@ -751,14 +1128,20 @@ def main() -> None:
         question_level_rows,
         [
             "run_id",
-            "path_config",
+            "sweep_group",
+            "sweep_var",
+            "sweep_value",
             "variant_mode",
             "secondary_variant_weight",
+            "translation_ratio",
+            "rerank_alpha",
             "weight_vec",
             "weight_bm25",
             "q_id",
             "lang",
             "question",
+            "gold_chunk_ids",
+            "gold_chunk",
             "variants",
             "base_top1_score",
             "base_top1_chunk_type",
@@ -767,7 +1150,13 @@ def main() -> None:
             "rerank_top1_chunk_type",
             "rerank_top1_preview",
             "rerank_margin_top1_top2",
-            "top1_changed_vs_baseline",
+            "top1_matched_chunk_ids",
+            "hit_at_1",
+            "hit_at_5",
+            "hit_at_8",
+            "dynamic_k",
+            "dynamic_ratio",
+            "hit_at_dynamic_k",
         ],
     )
 
@@ -776,9 +1165,13 @@ def main() -> None:
         interaction_summary_rows,
         [
             "run_id",
-            "path_config",
+            "sweep_group",
+            "sweep_var",
+            "sweep_value",
             "variant_mode",
             "secondary_variant_weight",
+            "translation_ratio",
+            "rerank_alpha",
             "weight_vec",
             "weight_bm25",
             "exit_code",
@@ -790,7 +1183,15 @@ def main() -> None:
             "avg_rerank_top1_score",
             "avg_rerank_margin_top1_top2",
             "unique_rerank_top1_chunks",
-            "top1_changed_rate_vs_baseline",
+            "hit_at_1_count",
+            "hit_at_1_rate",
+            "hit_at_5_count",
+            "hit_at_5_rate",
+            "hit_at_8_count",
+            "hit_at_8_rate",
+            "hit_at_dynamic_k_count",
+            "hit_at_dynamic_k_rate",
+            "avg_dynamic_k",
         ],
     )
 
@@ -801,6 +1202,8 @@ def main() -> None:
         run_summaries=interaction_summary_rows,
         question_rows=question_level_rows,
         top_k=args.top_k,
+        eval_topks=eval_topks,
+        dynamic_topk_ratio=dynamic_topk_ratio,
     )
     build_markdown_details(
         run_dir=run_dir,
@@ -808,13 +1211,21 @@ def main() -> None:
         run_payloads=run_payloads,
         top_k=args.top_k,
     )
+    plot_files = build_line_plots(
+        run_dir=run_dir,
+        run_summaries=interaction_summary_rows,
+        dynamic_topk_ratio=dynamic_topk_ratio,
+    )
 
     print("[INFO] Interaction ablation finished.", flush=True)
-    print(f"[INFO] Baseline run: {baseline_id}", flush=True)
     print(f"[INFO] Summary: {run_dir / 'summary.md'}", flush=True)
     print(f"[INFO] Details: {run_dir / 'details.md'}", flush=True)
     print(f"[INFO] Interaction table: {run_dir / 'interaction_summary.csv'}", flush=True)
     print(f"[INFO] Question-level table: {run_dir / 'question_level.csv'}", flush=True)
+    if plot_files:
+        print(f"[INFO] Plots generated: {len(plot_files)} under {run_dir / 'plots'}", flush=True)
+    else:
+        print("[WARN] Plots were not generated (matplotlib may be unavailable).", flush=True)
 
 
 if __name__ == "__main__":
