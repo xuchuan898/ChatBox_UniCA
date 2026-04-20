@@ -660,6 +660,17 @@ def build_markdown_summary(
     eval_topks: list[int],
     dynamic_topk_ratios: list[float],
 ) -> None:
+    def _parse_dynamic_map(raw: object) -> dict:
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
+        return {}
+
     lines = [
         "# Retrieval Interaction Ablation Summary",
         "",
@@ -709,10 +720,69 @@ def build_markdown_summary(
             f"{row['avg_rerank_top1_score']:.4f} | {row['avg_rerank_margin_top1_top2']:.4f} |"
         )
 
+    lines.extend(["", "## Dynamic-K Ratio Breakdown", ""])
+    dyn_headers = []
+    for ratio in dynamic_topk_ratios:
+        dyn_headers.extend([f"r={ratio:.2f} Hit", f"r={ratio:.2f} AvgK"])
+    lines.append("| Run ID | " + " | ".join(dyn_headers) + " |")
+    lines.append("| --- | " + " | ".join(["---:"] * len(dyn_headers)) + " |")
+
+    rows_by_run: dict[str, list[dict]] = {}
+    for qrow in question_rows:
+        run_id = str(qrow.get("run_id", ""))
+        rows_by_run.setdefault(run_id, []).append(qrow)
+
+    for row in run_summaries:
+        run_id = str(row.get("run_id", ""))
+        run_q_rows = rows_by_run.get(run_id, [])
+        q = max(len(run_q_rows), 1)
+        cells = []
+        for ratio in dynamic_topk_ratios:
+            key = f"{ratio:.4f}"
+            hit_count = 0
+            sum_k = 0
+            for qrow in run_q_rows:
+                dyn_map = _parse_dynamic_map(qrow.get("dynamic_by_ratio", {}))
+                dyn = dyn_map.get(key, {})
+                if isinstance(dyn, dict):
+                    hit_count += int(dyn.get("hit", 0))
+                    sum_k += int(dyn.get("k", 0))
+            hit_pct = (hit_count / q) * 100.0
+            avg_k = (sum_k / q) if q else 0.0
+            cells.append(f"{hit_count}/{q} ({hit_pct:.2f}%)")
+            cells.append(f"{avg_k:.2f}")
+        lines.append(f"| {run_id} | " + " | ".join(cells) + " |")
+
     lines.extend(
         [
             "",
-            f"- Run Summary table uses legacy DynamicK fields at first ratio r={dynamic_topk_ratios[0]:.2f}.",
+            f"- Run Summary table keeps legacy DynamicK fields at first ratio r={dynamic_topk_ratios[0]:.2f}.",
+            "",
+            "## Plot Guide",
+            "",
+            "### What each plotted metric means",
+            "",
+            f"- `Hit@1`: number of questions where the correct chunk appears in top-1 rerank result (`hit_at_1_count`, out of `Q`).",
+            f"- `Hit@5`: number of questions where the correct chunk appears in top-5 rerank results (`hit_at_5_count`, out of `Q`).",
+            f"- `Hit@8`: number of questions where the correct chunk appears in top-8 rerank results (`hit_at_8_count`, out of `Q`).",
+            f"- `Hit@DynamicK(r={dynamic_topk_ratios[0]:.2f})`: for each question, keep rerank rows with `score >= r * max_score`; count as hit if any kept row matches gold chunk.",
+            "- `Avg Dynamic-K`: average number of kept rows under the dynamic threshold rule above.",
+            "",
+            "### How metrics are computed",
+            "",
+            "- Matching is strict chunk-level: rerank preview is mapped to chunk id, then compared to `gold_chunk_ids`.",
+            "- Each point in a curve is aggregated over all questions in one run.",
+            "- In `metrics_vs_*.png`, Y values are hit counts (not percentages). Convert to accuracy by `count / Q`.",
+            "- For dynamic-k across all ratios (0.5~0.9), use the `Dynamic-K Ratio Breakdown` table above.",
+            "",
+            "### What each figure file shows",
+            "",
+            "- `plots/metrics_vs_bm25_ratio.png`: X is BM25 ratio sweep (`w_bm25`), with other variables fixed.",
+            "- `plots/metrics_vs_translation_ratio.png`: X is retrieval translation ratio sweep.",
+            "- `plots/metrics_vs_rerank_alpha.png`: X is rerank fusion alpha sweep.",
+            "- `plots/avg_dynamic_k_vs_bm25_ratio.png`: X is BM25 ratio; Y is average dynamic-K.",
+            "- `plots/avg_dynamic_k_vs_translation_ratio.png`: X is translation ratio; Y is average dynamic-K.",
+            "- `plots/avg_dynamic_k_vs_rerank_alpha.png`: X is rerank alpha; Y is average dynamic-K.",
             "",
             "## Artifacts",
             "",
