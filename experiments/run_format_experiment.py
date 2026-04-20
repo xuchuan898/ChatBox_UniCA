@@ -25,13 +25,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--question-file",
         type=Path,
-        default=Path("questions/questions_batch_advanced_en_fr.txt"),
+        default=Path("questions/questions_batch_student_short_typo_en_fr.txt"),
         help="Batch question file path (relative to project root if not absolute).",
     )
     parser.add_argument(
         "--gold-file",
         type=Path,
-        default=Path("questions/questions_batch_advanced_en_fr_gold.json"),
+        default=Path("questions/questions_batch_student_short_typo_en_fr_gold.json"),
         help="Gold file with expected answers and gold chunks for retrieval evaluation.",
     )
     parser.add_argument(

@@ -38,13 +38,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--question-file",
         type=Path,
-        default=Path("questions/questions_batch_example.txt"),
+        default=Path("questions/questions_batch_student_short_typo_en_fr.txt"),
         help="Question file path.",
     )
     parser.add_argument(
         "--gold-file",
         type=Path,
-        default=Path("questions/questions_batch_advanced_en_fr_gold.json"),
+        default=Path("questions/questions_batch_student_short_typo_en_fr_gold.json"),
         help="Gold file with expected answers and strict gold chunk ids.",
     )
     parser.add_argument(
@@ -693,11 +693,19 @@ def build_markdown_summary(
     )
     for row in run_summaries:
         q = max(int(row.get("questions", 0)), 1)
+        h1 = int(row.get("hit_at_1_count", 0))
+        h5 = int(row.get("hit_at_5_count", 0))
+        h8 = int(row.get("hit_at_8_count", 0))
+        hd = int(row.get("hit_at_dynamic_k_count", 0))
+        h1_pct = (h1 / q) * 100.0
+        h5_pct = (h5 / q) * 100.0
+        h8_pct = (h8 / q) * 100.0
+        hd_pct = (hd / q) * 100.0
         lines.append(
             f"| {row['run_id']} | {row['sweep_group']} | {row['sweep_value']:.2f} | {row['variant_mode']} | "
             f"{row['weight_vec']:.2f} | {row['weight_bm25']:.2f} | {row['translation_ratio']:.2f} | {row['rerank_alpha']:.2f} | "
-            f"{row.get('hit_at_1_count', 0)}/{q} | {row.get('hit_at_5_count', 0)}/{q} | {row.get('hit_at_8_count', 0)}/{q} | "
-            f"{row.get('hit_at_dynamic_k_count', 0)}/{q} | {row.get('avg_dynamic_k', 0.0):.2f} | "
+            f"{h1}/{q} ({h1_pct:.2f}%) | {h5}/{q} ({h5_pct:.2f}%) | {h8}/{q} ({h8_pct:.2f}%) | "
+            f"{hd}/{q} ({hd_pct:.2f}%) | {row.get('avg_dynamic_k', 0.0):.2f} | "
             f"{row['avg_rerank_top1_score']:.4f} | {row['avg_rerank_margin_top1_top2']:.4f} |"
         )
 
@@ -723,6 +731,8 @@ def build_markdown_details(
     run_dir: Path,
     questions: list[str],
     run_payloads: list[dict],
+    question_rows: list[dict],
+    dynamic_topk_ratios: list[float],
     top_k: int,
 ) -> None:
     lines = [
@@ -748,6 +758,35 @@ def build_markdown_details(
         lines.append(f"## Q{q_idx}")
         lines.append("")
         lines.append(f"Question: `{_md_escape(question)}`")
+        lines.append("")
+
+        lines.append("Dynamic-K summary by ratio:")
+        ratio_headers = [f"r={ratio:.2f}" for ratio in dynamic_topk_ratios]
+        lines.append("| Run ID | " + " | ".join([f"{h} (K/Hit%)" for h in ratio_headers]) + " |")
+        lines.append("| --- | " + " | ".join(["---"] * len(ratio_headers)) + " |")
+        q_rows = [r for r in question_rows if int(r.get("q_id", 0)) == q_idx]
+        q_rows_by_run = {str(r.get("run_id", "")): r for r in q_rows}
+        for run in sorted_runs:
+            row = q_rows_by_run.get(str(run.get("run_id", "")), {})
+            dyn_raw = row.get("dynamic_by_ratio", {})
+            if isinstance(dyn_raw, str):
+                try:
+                    dyn_map = json.loads(dyn_raw)
+                except Exception:
+                    dyn_map = {}
+            elif isinstance(dyn_raw, dict):
+                dyn_map = dyn_raw
+            else:
+                dyn_map = {}
+            cells = []
+            for ratio in dynamic_topk_ratios:
+                key = f"{ratio:.4f}"
+                dyn = dyn_map.get(key, {})
+                k_val = int(dyn.get("k", 0)) if isinstance(dyn, dict) else 0
+                hit_val = int(dyn.get("hit", 0)) if isinstance(dyn, dict) else 0
+                hit_pct = 100.0 if hit_val == 1 else 0.0
+                cells.append(f"{k_val}/{'✅' if hit_val == 1 else '❌'} ({hit_pct:.0f}%)")
+            lines.append(f"| {_md_escape(str(run.get('run_id', '')))} | " + " | ".join(cells) + " |")
         lines.append("")
 
         for run in sorted_runs:
@@ -1237,6 +1276,8 @@ def main() -> None:
         run_dir=run_dir,
         questions=questions,
         run_payloads=run_payloads,
+        question_rows=question_level_rows,
+        dynamic_topk_ratios=dynamic_topk_ratios,
         top_k=args.top_k,
     )
     plot_files = build_line_plots(
