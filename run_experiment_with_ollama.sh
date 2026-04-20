@@ -38,5 +38,12 @@ ollama list
 ps aux | grep ollama || true
 ollama pull gemma3:1b
 
-# Launch experiment script (pass through extra args if provided).
-python experiments/run_format_experiment.py --auto-start-ollama "$@"
+# Launch experiment script with default settings for master.md only.
+# Extra CLI args can still be appended to override these defaults.
+python experiments/run_format_experiment.py \
+  --auto-start-ollama \
+  --docs docs/chroma/master.md \
+  --question-file questions/questions_batch_student_short_typo_en_fr.txt \
+  --gold-file questions/questions_batch_student_short_typo_en_fr_gold.json \
+  --dynamic-topk-ratio 0.90 \
+  "$@"
