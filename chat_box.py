@@ -385,8 +385,9 @@ def _adaptive_split_documents(docs: List[Document], debug: bool = False, save_ch
     if save_chunks_file:
         import json
         with open(save_chunks_file, "w", encoding="utf-8") as f:
-            for c in final_chunks:
+            for idx, c in enumerate(final_chunks):
                 record = {
+                    "chunk_id": idx,
                     "content": c.page_content,
                     "chunk_type": c.metadata.get("chunk_type", "unknown"),
                     "source": c.metadata.get("source", "unknown"),

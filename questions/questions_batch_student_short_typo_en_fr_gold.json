@@ -6,10 +6,15 @@
     {
       "qid": 1,
       "lang": "en",
-      "question": "Who is the M2 head, and what is the email?",
+      "question": "who is m2 head? can share email pls?",
       "expected_answer": "Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr).",
       "gold_chunk": "PARCOURS IA > Responsable de master",
-      "gold_chunk_ids": [9]
+      "gold_chunk_ids": [
+        9
+      ],
+      "gold_chunks_full": [
+        "[Context: PARCOURS IA > Responsable de master:]\n## Responsable de master:\n- responsable M1 : Chuan Xu (Chuan.XU@univ-cotedazur.fr)  \n- responsable M2 : Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr)  \n- responsable Alternance M1: Etienne Lozes (Etienne.LOZES@univ-cotedazur.fr)  \n- Assistant: Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr)"
+      ]
     },
     {
       "qid": 1,
@@ -17,15 +22,25 @@
       "question": "Qui est responsable du M2, et quel est son e-mail ?",
       "expected_answer": "Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr).",
       "gold_chunk": "PARCOURS IA > Responsable de master",
-      "gold_chunk_ids": [9]
+      "gold_chunk_ids": [
+        9
+      ],
+      "gold_chunks_full": [
+        "[Context: PARCOURS IA > Responsable de master:]\n## Responsable de master:\n- responsable M1 : Chuan Xu (Chuan.XU@univ-cotedazur.fr)  \n- responsable M2 : Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr)  \n- responsable Alternance M1: Etienne Lozes (Etienne.LOZES@univ-cotedazur.fr)  \n- Assistant: Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr)"
+      ]
     },
     {
       "qid": 2,
       "lang": "en",
-      "question": "Who is the program assistant, with email?",
+      "question": "assistant mail? can you give it?",
       "expected_answer": "Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr).",
       "gold_chunk": "PARCOURS IA > Responsable de master",
-      "gold_chunk_ids": [9]
+      "gold_chunk_ids": [
+        9
+      ],
+      "gold_chunks_full": [
+        "[Context: PARCOURS IA > Responsable de master:]\n## Responsable de master:\n- responsable M1 : Chuan Xu (Chuan.XU@univ-cotedazur.fr)  \n- responsable M2 : Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr)  \n- responsable Alternance M1: Etienne Lozes (Etienne.LOZES@univ-cotedazur.fr)  \n- Assistant: Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr)"
+      ]
     },
     {
       "qid": 2,
@@ -33,15 +48,25 @@
       "question": "Qui est l'assistant du master, avec l'e-mail ?",
       "expected_answer": "Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr).",
       "gold_chunk": "PARCOURS IA > Responsable de master",
-      "gold_chunk_ids": [9]
+      "gold_chunk_ids": [
+        9
+      ],
+      "gold_chunks_full": [
+        "[Context: PARCOURS IA > Responsable de master:]\n## Responsable de master:\n- responsable M1 : Chuan Xu (Chuan.XU@univ-cotedazur.fr)  \n- responsable M2 : Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr)  \n- responsable Alternance M1: Etienne Lozes (Etienne.LOZES@univ-cotedazur.fr)  \n- Assistant: Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr)"
+      ]
     },
     {
       "qid": 3,
       "lang": "en",
-      "question": "What is the alternnce contact email for M1?",
+      "question": "alternnce contact email for m1?",
       "expected_answer": "Etienne Lozes (Etienne.LOZES@univ-cotedazur.fr).",
       "gold_chunk": "PARCOURS IA > Responsable de master",
-      "gold_chunk_ids": [9]
+      "gold_chunk_ids": [
+        9
+      ],
+      "gold_chunks_full": [
+        "[Context: PARCOURS IA > Responsable de master:]\n## Responsable de master:\n- responsable M1 : Chuan Xu (Chuan.XU@univ-cotedazur.fr)  \n- responsable M2 : Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr)  \n- responsable Alternance M1: Etienne Lozes (Etienne.LOZES@univ-cotedazur.fr)  \n- Assistant: Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr)"
+      ]
     },
     {
       "qid": 3,
@@ -49,15 +74,25 @@
       "question": "Quel est l'e-mail du contact alternance pour le M1 ?",
       "expected_answer": "Etienne Lozes (Etienne.LOZES@univ-cotedazur.fr).",
       "gold_chunk": "PARCOURS IA > Responsable de master",
-      "gold_chunk_ids": [9]
+      "gold_chunk_ids": [
+        9
+      ],
+      "gold_chunks_full": [
+        "[Context: PARCOURS IA > Responsable de master:]\n## Responsable de master:\n- responsable M1 : Chuan Xu (Chuan.XU@univ-cotedazur.fr)  \n- responsable M2 : Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr)  \n- responsable Alternance M1: Etienne Lozes (Etienne.LOZES@univ-cotedazur.fr)  \n- Assistant: Audrey Ereteo (Audrey.ERETEO@univ-cotedazur.fr)"
+      ]
     },
     {
       "qid": 4,
       "lang": "en",
-      "question": "How long is the mandatory internship?",
+      "question": "internship how many month exactly?",
       "expected_answer": "4 to 6 months.",
       "gold_chunk": "PARCOURS IA > Stage : oui, 4 a 6 mois",
-      "gold_chunk_ids": [8]
+      "gold_chunk_ids": [
+        8
+      ],
+      "gold_chunks_full": [
+        "[Context: PARCOURS IA > Stage : oui, 4 à 6 mois]\n## Stage : oui, 4 à 6 mois"
+      ]
     },
     {
       "qid": 4,
@@ -65,15 +100,25 @@
       "question": "Quelle est la duree du stage obligatoir ?",
       "expected_answer": "4 a 6 mois.",
       "gold_chunk": "PARCOURS IA > Stage : oui, 4 a 6 mois",
-      "gold_chunk_ids": [8]
+      "gold_chunk_ids": [
+        8
+      ],
+      "gold_chunks_full": [
+        "[Context: PARCOURS IA > Stage : oui, 4 à 6 mois]\n## Stage : oui, 4 à 6 mois"
+      ]
     },
     {
       "qid": 5,
       "lang": "en",
-      "question": "How many ECTS is Neural Language Processing?",
+      "question": "neural l p course ects how many?",
       "expected_answer": "3 ECTS.",
       "gold_chunk": "Semestre 1 > UE Neural Language Processing",
-      "gold_chunk_ids": [13]
+      "gold_chunk_ids": [
+        13
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **UE Neural Language Processing** (EN) - 3 ECTS]\n### **UE Neural Language Processing** (EN) - 3 ECTS  \n- Lecteur: Mme. Ollagnier\n- This course offers a modern introduction to how machines understand and generate information by connecting data, representation, and learning. We begin with the foundations: how raw data is transformed into meaningful numerical forms through embeddings and how these representations populate latent spaces where similarity, structure, and meaning can be analyzed mathematically. We then explore the evolution of sequence modeling—from the early days of Recurrent Neural Networks (RNNs) to the emergence of Transformers, the architecture that now powers today’s Large Language Models (LLMs) such as GPT, BERT, and T5. Along the way, students will discover how attention mechanisms replaced recurrence and enabled models to scale, reason, and generalize. Finally, the course emphasizes practical skills in data analysis and visualization, enabling you to interpret model behavior, examine embedding spaces, and better understand how language models structure and transform information."
+      ]
     },
     {
       "qid": 5,
@@ -81,15 +126,25 @@
       "question": "Combien d'ECTS vaut Neural Language Processing ?",
       "expected_answer": "3 ECTS.",
       "gold_chunk": "Semestre 1 > UE Neural Language Processing",
-      "gold_chunk_ids": [13]
+      "gold_chunk_ids": [
+        13
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **UE Neural Language Processing** (EN) - 3 ECTS]\n### **UE Neural Language Processing** (EN) - 3 ECTS  \n- Lecteur: Mme. Ollagnier\n- This course offers a modern introduction to how machines understand and generate information by connecting data, representation, and learning. We begin with the foundations: how raw data is transformed into meaningful numerical forms through embeddings and how these representations populate latent spaces where similarity, structure, and meaning can be analyzed mathematically. We then explore the evolution of sequence modeling—from the early days of Recurrent Neural Networks (RNNs) to the emergence of Transformers, the architecture that now powers today’s Large Language Models (LLMs) such as GPT, BERT, and T5. Along the way, students will discover how attention mechanisms replaced recurrence and enabled models to scale, reason, and generalize. Finally, the course emphasizes practical skills in data analysis and visualization, enabling you to interpret model behavior, examine embedding spaces, and better understand how language models structure and transform information."
+      ]
     },
     {
       "qid": 6,
       "lang": "en",
-      "question": "Who teaches AI Game Programming in S1?",
+      "question": "ai game prog teacher in s1?",
       "expected_answer": "M. Regin.",
       "gold_chunk": "Semestre 1 > UE AI Game Programming",
-      "gold_chunk_ids": [10]
+      "gold_chunk_ids": [
+        10
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **UE AI Game Programming (EN)** - 3 ECTS]\n# Cours Programme 2026/2027  \n## Semestre 1  \n### **UE AI Game Programming (EN)** - 3 ECTS  \n- Lecteur: M. Regin\n- This course presents different techniques to program games for one or two players. For two-player games, only full information games will be considered.\n- The students will have to develop, in groups of two, a program that will simulate a human player.\nA competition between the programs will be organized and it will determine the notes."
+      ]
     },
     {
       "qid": 6,
@@ -97,15 +152,27 @@
       "question": "Qui enseigne AI Game Programing en S1 ?",
       "expected_answer": "M. Regin.",
       "gold_chunk": "Semestre 1 > UE AI Game Programming",
-      "gold_chunk_ids": [10]
+      "gold_chunk_ids": [
+        10
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **UE AI Game Programming (EN)** - 3 ECTS]\n# Cours Programme 2026/2027  \n## Semestre 1  \n### **UE AI Game Programming (EN)** - 3 ECTS  \n- Lecteur: M. Regin\n- This course presents different techniques to program games for one or two players. For two-player games, only full information games will be considered.\n- The students will have to develop, in groups of two, a program that will simulate a human player.\nA competition between the programs will be organized and it will determine the notes."
+      ]
     },
     {
       "qid": 7,
       "lang": "en",
-      "question": "Which two courses are taught by M. Regin?",
+      "question": "regin teaches which 2 courses in total?",
       "expected_answer": "UE AI Game Programming (S1) and UE Combinatorial Optimization (S2).",
       "gold_chunk": "Semestre 1/2 courses taught by M. Regin",
-      "gold_chunk_ids": [10, 29]
+      "gold_chunk_ids": [
+        10,
+        29
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **UE AI Game Programming (EN)** - 3 ECTS]\n# Cours Programme 2026/2027  \n## Semestre 1  \n### **UE AI Game Programming (EN)** - 3 ECTS  \n- Lecteur: M. Regin\n- This course presents different techniques to program games for one or two players. For two-player games, only full information games will be considered.\n- The students will have to develop, in groups of two, a program that will simulate a human player.\nA competition between the programs will be organized and it will determine the notes.",
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **UE Combinatorial Optimization** (EN) - 3 ECTS]\n### **UE Combinatorial Optimization** (EN) - 3 ECTS  \n- Lecteur: M. Regin\n- This course presents greedy algorithms, decision diagrams, and markov models."
+      ]
     },
     {
       "qid": 7,
@@ -113,15 +180,27 @@
       "question": "Quelles sont les deux UE enseignees par M. Regin ?",
       "expected_answer": "UE AI Game Programming (S1) et UE Combinatorial Optimization (S2).",
       "gold_chunk": "Semestre 1/2 courses taught by M. Regin",
-      "gold_chunk_ids": [10, 29]
+      "gold_chunk_ids": [
+        10,
+        29
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **UE AI Game Programming (EN)** - 3 ECTS]\n# Cours Programme 2026/2027  \n## Semestre 1  \n### **UE AI Game Programming (EN)** - 3 ECTS  \n- Lecteur: M. Regin\n- This course presents different techniques to program games for one or two players. For two-player games, only full information games will be considered.\n- The students will have to develop, in groups of two, a program that will simulate a human player.\nA competition between the programs will be organized and it will determine the notes.",
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **UE Combinatorial Optimization** (EN) - 3 ECTS]\n### **UE Combinatorial Optimization** (EN) - 3 ECTS  \n- Lecteur: M. Regin\n- This course presents greedy algorithms, decision diagrams, and markov models."
+      ]
     },
     {
       "qid": 8,
       "lang": "en",
-      "question": "Which S2 course includes belief revision and fuzzy logic?",
+      "question": "s2 course with belief revision + fuzzy logic, name?",
       "expected_answer": "UE Logic for AI (EN).",
       "gold_chunk": "Semestre 2 > UE Logic for AI",
-      "gold_chunk_ids": [30]
+      "gold_chunk_ids": [
+        30
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **UE Logic for AI** (EN) - 3 ECTS]\n### **UE Logic for AI** (EN) - 3 ECTS  \n- Lecteur: M. Tettamanzi\n- The objective of this course is to provide a general background in Logic to enable access to more advanced topics in computer science and, more specifically, in artificial intelligence. Intelligent systems in the real world have to deal with issues like uncertainty, imprecision, and incompleteness. Some prominent logical tools that can be used to approach these issues are thus discussed.\n- **Lectures**\n- Part I. Basics\n- Propositional Logic: syntax and semantics\n- First Order Predicate Logic: syntax and semantics\n- Natural Deduction\n- Unification and Resolution\n- Part II. Non-Monotonic Logic and Approximate Reasoning\n- Argumentation Theory\n- Belief Revision and Update\n- Fuzzy Logic\n- Possibility Theory"
+      ]
     },
     {
       "qid": 8,
@@ -129,31 +208,51 @@
       "question": "Quelle UE de S2 parle de revision des croyances et de logique floue ?",
       "expected_answer": "UE Logic for AI (EN).",
       "gold_chunk": "Semestre 2 > UE Logic for AI",
-      "gold_chunk_ids": [30]
+      "gold_chunk_ids": [
+        30
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **UE Logic for AI** (EN) - 3 ECTS]\n### **UE Logic for AI** (EN) - 3 ECTS  \n- Lecteur: M. Tettamanzi\n- The objective of this course is to provide a general background in Logic to enable access to more advanced topics in computer science and, more specifically, in artificial intelligence. Intelligent systems in the real world have to deal with issues like uncertainty, imprecision, and incompleteness. Some prominent logical tools that can be used to approach these issues are thus discussed.\n- **Lectures**\n- Part I. Basics\n- Propositional Logic: syntax and semantics\n- First Order Predicate Logic: syntax and semantics\n- Natural Deduction\n- Unification and Resolution\n- Part II. Non-Monotonic Logic and Approximate Reasoning\n- Argumentation Theory\n- Belief Revision and Update\n- Fuzzy Logic\n- Possibility Theory"
+      ]
     },
     {
       "qid": 9,
       "lang": "en",
-      "question": "Which S2 course mentions text classificatn and sentiment analysis?",
-      "expected_answer": "UE Natural Language Processing (EN).",
-      "gold_chunk": "Semestre 2 > UE Natural Language Processing",
-      "gold_chunk_ids": [27, 28]
+      "question": "s2 combinatorial optimization teacher who?",
+      "expected_answer": "M. Regin.",
+      "gold_chunk": "Semestre 2 > UE Combinatorial Optimization",
+      "gold_chunk_ids": [
+        29
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **UE Combinatorial Optimization** (EN) - 3 ECTS]\n### **UE Combinatorial Optimization** (EN) - 3 ECTS  \n- Lecteur: M. Regin\n- This course presents greedy algorithms, decision diagrams, and markov models."
+      ]
     },
     {
       "qid": 9,
       "lang": "fr",
-      "question": "Quelle UE de S2 mentionne la classification de texte et l'analyse de sentiment ?",
-      "expected_answer": "UE Natural Language Processing (EN).",
-      "gold_chunk": "Semestre 2 > UE Natural Language Processing",
-      "gold_chunk_ids": [27, 28]
+      "question": "En S2, qui enseigne l'UE combinatorial optimization ?",
+      "expected_answer": "M. Regin.",
+      "gold_chunk": "Semestre 2 > UE Combinatorial Optimization",
+      "gold_chunk_ids": [
+        29
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **UE Combinatorial Optimization** (EN) - 3 ECTS]\n### **UE Combinatorial Optimization** (EN) - 3 ECTS  \n- Lecteur: M. Regin\n- This course presents greedy algorithms, decision diagrams, and markov models."
+      ]
     },
     {
       "qid": 10,
       "lang": "en",
-      "question": "Which S1 course covers Kripke and CTL/LTL?",
+      "question": "which s1 course has kripke + ctl/ltl exactly?",
       "expected_answer": "UE Model Checking for AI (EN).",
       "gold_chunk": "Semestre 1 > UE Model Checking for AI",
-      "gold_chunk_ids": [12]
+      "gold_chunk_ids": [
+        12
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **UE Model Checking for AI** (EN) - 3 ECTS]\n### **UE Model Checking for AI** (EN) - 3 ECTS  \n- Lecteur: Mme. De Maria\n- This course covers methods and tools for automatically checking\nwhether a system (software or hardware) meets a given specification.\n- Course program\n- The need for formal methods to verify hardware and software systems\n- Reactive systems\n- The model-checking process and its advantages\n- System modeling (Kripke structure)\n- Specification modeling (CTL and LTL temporal logics, fairness)\n- Model-checking algorithms and their complexity\n- Improvements: symbolic model-checking and on-the-fly model-checking\n- Realistic examples"
+      ]
     },
     {
       "qid": 10,
@@ -161,15 +260,25 @@
       "question": "Quelle UE de S1 couvre Kripke et CTL/LTL ?",
       "expected_answer": "UE Model Checking for AI (EN).",
       "gold_chunk": "Semestre 1 > UE Model Checking for AI",
-      "gold_chunk_ids": [12]
+      "gold_chunk_ids": [
+        12
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **UE Model Checking for AI** (EN) - 3 ECTS]\n### **UE Model Checking for AI** (EN) - 3 ECTS  \n- Lecteur: Mme. De Maria\n- This course covers methods and tools for automatically checking\nwhether a system (software or hardware) meets a given specification.\n- Course program\n- The need for formal methods to verify hardware and software systems\n- Reactive systems\n- The model-checking process and its advantages\n- System modeling (Kripke structure)\n- Specification modeling (CTL and LTL temporal logics, fairness)\n- Model-checking algorithms and their complexity\n- Improvements: symbolic model-checking and on-the-fly model-checking\n- Realistic examples"
+      ]
     },
     {
       "qid": 11,
       "lang": "en",
-      "question": "Which S1 course says students solve ACM-style puzzles?",
+      "question": "s1 course with acm puzzle style, name?",
       "expected_answer": "Programming Challenge (EN).",
       "gold_chunk": "Semestre 1 > Programming Challenge",
-      "gold_chunk_ids": [22]
+      "gold_chunk_ids": [
+        22
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **Programming Challenge** (EN) - 3 ECTS]\n### **Programming Challenge** (EN) - 3 ECTS  \n- Lecteur: M. Malapert\n- This course will introduce an interesting variety of subjects in programming, algorithms, and discrete mathematics though puzzles and problems which have appeared in the International ACM Programming Contest and similar venues."
+      ]
     },
     {
       "qid": 11,
@@ -177,15 +286,25 @@
       "question": "Quelle UE de S1 indique des enigmes type ACM ?",
       "expected_answer": "Programming Challenge (EN).",
       "gold_chunk": "Semestre 1 > Programming Challenge",
-      "gold_chunk_ids": [22]
+      "gold_chunk_ids": [
+        22
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **Programming Challenge** (EN) - 3 ECTS]\n### **Programming Challenge** (EN) - 3 ECTS  \n- Lecteur: M. Malapert\n- This course will introduce an interesting variety of subjects in programming, algorithms, and discrete mathematics though puzzles and problems which have appeared in the International ACM Programming Contest and similar venues."
+      ]
     },
     {
       "qid": 12,
       "lang": "en",
-      "question": "Which S1 elective is about GPU cluster ML parallelization?",
+      "question": "gpu cluster ml elective name in s1?",
       "expected_answer": "Distributed Computing and Learning (EN).",
       "gold_chunk": "Semestre 1 > Distributed Computing and Learning",
-      "gold_chunk_ids": [21]
+      "gold_chunk_ids": [
+        21
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **Distributed Computing and Learning** (EN) - 3 ECTS]\n### **Distributed Computing and Learning** (EN) - 3 ECTS  \n- Lecteur: Mme. XU\n- This [course](https://sites.google.com/view/chuanxu/distributed-computing-and-learning)\nmainly focus on distributed-memory parallel framework, where each\nprocessor (core, CPU,  GPU, IoT device) has its own memory space which\ncan not be shared with others. This parallel framework is popular as it\ncorresponds to many real application scenarios such as the cluster, the\nsensor network and IoT.\n- The goal of this course is to explore the most popular strategies for\nparallelizing machine learning (ML) tasks without data-sharing across\nvarious real-world application scenarios. Additionally, the students\nwill learn to maintain the privacy and security of such distributed\nsystems. For the lab, the students will parallelize their ML tasks in a\nreal GPU-equipped cluster (Grid5000) using [PyTorch](https://pytorch.org/). This hand-on experience will enable students to accelerate heavy computations involved in training large neural networks."
+      ]
     },
     {
       "qid": 12,
@@ -193,15 +312,25 @@
       "question": "Quelle UE au choix de S1 traite de ML sur cluster GPU ?",
       "expected_answer": "Distributed Computing and Learning (EN).",
       "gold_chunk": "Semestre 1 > Distributed Computing and Learning",
-      "gold_chunk_ids": [21]
+      "gold_chunk_ids": [
+        21
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **Distributed Computing and Learning** (EN) - 3 ECTS]\n### **Distributed Computing and Learning** (EN) - 3 ECTS  \n- Lecteur: Mme. XU\n- This [course](https://sites.google.com/view/chuanxu/distributed-computing-and-learning)\nmainly focus on distributed-memory parallel framework, where each\nprocessor (core, CPU,  GPU, IoT device) has its own memory space which\ncan not be shared with others. This parallel framework is popular as it\ncorresponds to many real application scenarios such as the cluster, the\nsensor network and IoT.\n- The goal of this course is to explore the most popular strategies for\nparallelizing machine learning (ML) tasks without data-sharing across\nvarious real-world application scenarios. Additionally, the students\nwill learn to maintain the privacy and security of such distributed\nsystems. For the lab, the students will parallelize their ML tasks in a\nreal GPU-equipped cluster (Grid5000) using [PyTorch](https://pytorch.org/). This hand-on experience will enable students to accelerate heavy computations involved in training large neural networks."
+      ]
     },
     {
       "qid": 13,
       "lang": "en",
-      "question": "Which S2 course is taught by M. Malapert?",
+      "question": "malapert teaches which s2 course exactly?",
       "expected_answer": "UE Modelisation par des contraintes.",
       "gold_chunk": "Semestre 2 > UE Modelisation par des contraintes",
-      "gold_chunk_ids": [31]
+      "gold_chunk_ids": [
+        31
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **UE Modélisation par des contraintes**- 3 ECTS]\n### **UE Modélisation par des contraintes**- 3 ECTS  \n- Lecteur: M. Malapert\n- Les principes fondamentaux de la programmation linéaire et de la programmation par contraintes sont abordés en vue d’une meilleure exploitation des ces méthodes. La programmation linéaire est une technique largement utilisée pour résoudre des problèmes d’optimisation linéaire. Quant à la programmation par contraintes, elle s’avère particulièrement adaptée à la résolution de problèmes combinatoires complexes, comme ceux liés à l’ordonnancement ou à la planification.\n- L’objectif principal du cours est l’apprentissage de la modélisation de ces problèmes que ce soit en programmation linéaire ou en programmation par contraintes. Nous adoptons une approche comparative empirique pour déterminer quelle méthode est la plus adaptée pour un problème particulier."
+      ]
     },
     {
       "qid": 13,
@@ -209,15 +338,25 @@
       "question": "Quelle UE de S2 est enseignee par M. Malapert ?",
       "expected_answer": "UE Modelisation par des contraintes.",
       "gold_chunk": "Semestre 2 > UE Modelisation par des contraintes",
-      "gold_chunk_ids": [31]
+      "gold_chunk_ids": [
+        31
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **UE Modélisation par des contraintes**- 3 ECTS]\n### **UE Modélisation par des contraintes**- 3 ECTS  \n- Lecteur: M. Malapert\n- Les principes fondamentaux de la programmation linéaire et de la programmation par contraintes sont abordés en vue d’une meilleure exploitation des ces méthodes. La programmation linéaire est une technique largement utilisée pour résoudre des problèmes d’optimisation linéaire. Quant à la programmation par contraintes, elle s’avère particulièrement adaptée à la résolution de problèmes combinatoires complexes, comme ceux liés à l’ordonnancement ou à la planification.\n- L’objectif principal du cours est l’apprentissage de la modélisation de ces problèmes que ce soit en programmation linéaire ou en programmation par contraintes. Nous adoptons une approche comparative empirique pour déterminer quelle méthode est la plus adaptée pour un problème particulier."
+      ]
     },
     {
       "qid": 14,
       "lang": "en",
-      "question": "Which S2 elective is taught by M. Buffa?",
+      "question": "buffa course in s2, course name?",
       "expected_answer": "3D Game Programming in Real Time on the Web (EN).",
       "gold_chunk": "Semestre 2 > 3D Game Programming in Real Time on the Web",
-      "gold_chunk_ids": [36]
+      "gold_chunk_ids": [
+        36
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **3D Game Programming in Real Time on the Web**(EN) - 3 ECTS]\n### **3D Game Programming in Real Time on the Web**(EN) - 3 ECTS  \n- Lecteur: M. Buffa\n- La complexité computationnelle est une notion fondamentale en informatique qui essaye de comparer/classer les algorithmes par rapport à des fonctions de coût des ressources demandées par leur exécution (complète). La complexité d'un algorithme est donc une mesure de la qualité (un algorithme et d'autant plus *bon* s'il consomme moins de ressources par rapport aux autres algos qui ressoudent le même problème) et comme toute mesure elle a besoin d'un système de référence. Les machines de Turing vont être notre principal système de référence."
+      ]
     },
     {
       "qid": 14,
@@ -225,15 +364,25 @@
       "question": "Quelle UE au choix de S2 est enseignee par M. Buffa ?",
       "expected_answer": "3D Game Programming in Real Time on the Web (EN).",
       "gold_chunk": "Semestre 2 > 3D Game Programming in Real Time on the Web",
-      "gold_chunk_ids": [36]
+      "gold_chunk_ids": [
+        36
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **3D Game Programming in Real Time on the Web**(EN) - 3 ECTS]\n### **3D Game Programming in Real Time on the Web**(EN) - 3 ECTS  \n- Lecteur: M. Buffa\n- La complexité computationnelle est une notion fondamentale en informatique qui essaye de comparer/classer les algorithmes par rapport à des fonctions de coût des ressources demandées par leur exécution (complète). La complexité d'un algorithme est donc une mesure de la qualité (un algorithme et d'autant plus *bon* s'il consomme moins de ressources par rapport aux autres algos qui ressoudent le même problème) et comme toute mesure elle a besoin d'un système de référence. Les machines de Turing vont être notre principal système de référence."
+      ]
     },
     {
       "qid": 15,
       "lang": "en",
-      "question": "Which S2 elective is taught by M. Lozes?",
+      "question": "lozes elective s2 name, what is it?",
       "expected_answer": "Scalable Data Science (EN).",
       "gold_chunk": "Semestre 2 > Scalable Data Science",
-      "gold_chunk_ids": [35]
+      "gold_chunk_ids": [
+        35
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **Scalable Data Science**(EN) - 3 ECTS]\n### **Scalable Data Science**(EN) - 3 ECTS  \n- Lecteur: M. Lozes\n- Ce cours vise à donner les bases théoriques et pratiques pour le traitement distribué des données à des fins d'analyse statistique"
+      ]
     },
     {
       "qid": 15,
@@ -241,15 +390,25 @@
       "question": "Quelle UE au choix de S2 est enseignee par M. Lozes ?",
       "expected_answer": "Scalable Data Science (EN).",
       "gold_chunk": "Semestre 2 > Scalable Data Science",
-      "gold_chunk_ids": [35]
+      "gold_chunk_ids": [
+        35
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **Scalable Data Science**(EN) - 3 ECTS]\n### **Scalable Data Science**(EN) - 3 ECTS  \n- Lecteur: M. Lozes\n- Ce cours vise à donner les bases théoriques et pratiques pour le traitement distribué des données à des fins d'analyse statistique"
+      ]
     },
     {
       "qid": 16,
       "lang": "en",
-      "question": "Which S2 elective is taught by Mme. Di Giusto?",
+      "question": "di giusto elective s2, name?",
       "expected_answer": "Modelling Distributed Systems (EN).",
       "gold_chunk": "Semestre 2 > Modelling Distributed Systems",
-      "gold_chunk_ids": [37]
+      "gold_chunk_ids": [
+        37
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **Modelling Distributed Systems**(EN) - 3 ECTS]\n### **Modelling Distributed Systems**(EN) - 3 ECTS  \n- Mme. Di Giusto\n- The aim of this course is to introduce mathematical formalisms for modelling and reasoning about properties of distributed, reactive systems.\nTopics may include models of message passing and shared memory concurrency (Petri nets, process algebras, communicating and timed automata) as well as formalisms to reason on such systems (bisimulation techniques, session types, logics, invariants…)."
+      ]
     },
     {
       "qid": 16,
@@ -257,15 +416,25 @@
       "question": "Quelle UE au choix de S2 est enseignee par Mme. Di Giusto ?",
       "expected_answer": "Modelling Distributed Systems (EN).",
       "gold_chunk": "Semestre 2 > Modelling Distributed Systems",
-      "gold_chunk_ids": [37]
+      "gold_chunk_ids": [
+        37
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **Modelling Distributed Systems**(EN) - 3 ECTS]\n### **Modelling Distributed Systems**(EN) - 3 ECTS  \n- Mme. Di Giusto\n- The aim of this course is to introduce mathematical formalisms for modelling and reasoning about properties of distributed, reactive systems.\nTopics may include models of message passing and shared memory concurrency (Petri nets, process algebras, communicating and timed automata) as well as formalisms to reason on such systems (bisimulation techniques, session types, logics, invariants…)."
+      ]
     },
     {
       "qid": 17,
       "lang": "en",
-      "question": "Which S2 elective is taught by E. Formenti?",
+      "question": "formenti elective s2, name?",
       "expected_answer": "Computational Complexity (EN).",
       "gold_chunk": "Semestre 2 > Computational Complexity",
-      "gold_chunk_ids": [38]
+      "gold_chunk_ids": [
+        38
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **Computational Complexity**(EN) - 3 ECTS]\n### **Computational Complexity**(EN) - 3 ECTS  \n- Lecteur: E. Formenti\n- La complexité computationnelle est une notion fondamentale en informatique qui essaye de comparer/classer les algorithmes par rapport à des fonctions de coût des ressources demandées par leur exécution (complète). La complexité d’un algorithme est donc une mesure de la qualité et comme toute mesure elle a besoin d’un système de référence. Les machines de Turing vont être notre principal système de référence."
+      ]
     },
     {
       "qid": 17,
@@ -273,15 +442,25 @@
       "question": "Quelle UE au choix de S2 est enseignee par E. Formenti ?",
       "expected_answer": "Computational Complexity (EN).",
       "gold_chunk": "Semestre 2 > Computational Complexity",
-      "gold_chunk_ids": [38]
+      "gold_chunk_ids": [
+        38
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 2 > **Computational Complexity**(EN) - 3 ECTS]\n### **Computational Complexity**(EN) - 3 ECTS  \n- Lecteur: E. Formenti\n- La complexité computationnelle est une notion fondamentale en informatique qui essaye de comparer/classer les algorithmes par rapport à des fonctions de coût des ressources demandées par leur exécution (complète). La complexité d’un algorithme est donc une mesure de la qualité et comme toute mesure elle a besoin d’un système de référence. Les machines de Turing vont être notre principal système de référence."
+      ]
     },
     {
       "qid": 18,
       "lang": "en",
-      "question": "Which S1 course is co-taught by Leturc and Regin?",
+      "question": "leturc + regin co-teach which s1 ue exactly?",
       "expected_answer": "UE Software Engineering Software engineering and Design patterns (EN).",
       "gold_chunk": "Semestre 1 > UE Software Engineering Software engineering and Design patterns",
-      "gold_chunk_ids": [14]
+      "gold_chunk_ids": [
+        14
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **UE Software Engineering Software engineering and Design patterns**(EN) - 3 ECTS]\n### **UE Software Engineering Software engineering and Design patterns**(EN) - 3 ECTS  \n- Lecteur: Leturc, Regin"
+      ]
     },
     {
       "qid": 18,
@@ -289,39 +468,12 @@
       "question": "Quelle UE de S1 est co-enseignee par Leturc et Regin ?",
       "expected_answer": "UE Software Engineering Software engineering and Design patterns (EN).",
       "gold_chunk": "Semestre 1 > UE Software Engineering Software engineering and Design patterns",
-      "gold_chunk_ids": [14]
-    },
-    {
-      "qid": 19,
-      "lang": "en",
-      "question": "What creation date is shown on the M1 document?",
-      "expected_answer": "11 mars 2026.",
-      "gold_chunk": "MASTER IA Information (header)",
-      "gold_chunk_ids": [0]
-    },
-    {
-      "qid": 19,
-      "lang": "fr",
-      "question": "Quelle date de creation est affichee sur le document M1 ?",
-      "expected_answer": "11 mars 2026.",
-      "gold_chunk": "MASTER IA Information (header)",
-      "gold_chunk_ids": [0]
-    },
-    {
-      "qid": 20,
-      "lang": "en",
-      "question": "Which 3 practical learning formats are listed in pedagogy?",
-      "expected_answer": "Projets encadres, etudes de cas, travaux de groupe.",
-      "gold_chunk": "PARCOURS IA > Pedagogie",
-      "gold_chunk_ids": [4]
-    },
-    {
-      "qid": 20,
-      "lang": "fr",
-      "question": "Quels sont les 3 formats pratiques cites dans la pedagogie ?",
-      "expected_answer": "Projets encadres, etudes de cas, travaux de groupe.",
-      "gold_chunk": "PARCOURS IA > Pedagogie",
-      "gold_chunk_ids": [4]
+      "gold_chunk_ids": [
+        14
+      ],
+      "gold_chunks_full": [
+        "[Context: Cours Programme 2026/2027 > Semestre 1 > **UE Software Engineering Software engineering and Design patterns**(EN) - 3 ECTS]\n### **UE Software Engineering Software engineering and Design patterns**(EN) - 3 ECTS  \n- Lecteur: Leturc, Regin"
+      ]
     }
   ]
 }
