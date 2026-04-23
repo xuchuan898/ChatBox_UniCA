@@ -762,10 +762,10 @@ def build_markdown_summary(
             "",
             "### What each plotted metric means",
             "",
-            f"- `Hit@1`: number of questions where the correct chunk appears in top-1 rerank result (`hit_at_1_count`, out of `Q`).",
-            f"- `Hit@5`: number of questions where the correct chunk appears in top-5 rerank results (`hit_at_5_count`, out of `Q`).",
-            f"- `Hit@8`: number of questions where the correct chunk appears in top-8 rerank results (`hit_at_8_count`, out of `Q`).",
-            f"- `Hit@DynamicK(r={dynamic_topk_ratios[0]:.2f})`: for each question, keep rerank rows with `score >= r * max_score`; count as hit if any kept row matches gold chunk.",
+            f"- `Hit@1`: number of questions where all `gold_chunk_ids` are covered in top-W rerank results with W=max(1, G), G=len(`gold_chunk_ids`) (`hit_at_1_count`, out of `Q`).",
+            f"- `Hit@5`: number of questions where all `gold_chunk_ids` are covered in top-W rerank results with W=max(5, G), G=len(`gold_chunk_ids`) (`hit_at_5_count`, out of `Q`).",
+            f"- `Hit@8`: number of questions where all `gold_chunk_ids` are covered in top-W rerank results with W=max(8, G), G=len(`gold_chunk_ids`) (`hit_at_8_count`, out of `Q`).",
+            f"- `Hit@DynamicK(r={dynamic_topk_ratios[0]:.2f})`: for each question, keep rerank rows with `score >= r * max_score`; count as hit only when all `gold_chunk_ids` are covered.",
             "- `Avg Dynamic-K`: average number of kept rows under the dynamic threshold rule above.",
             "",
             "### How metrics are computed",
@@ -936,12 +936,22 @@ def build_line_plots(run_dir: Path, run_summaries: list[dict], dynamic_topk_rati
         # One chart per sweep with four metric lines.
         fig, ax = plt.subplots(figsize=(9, 5))
         xs = [float(r.get("sweep_value", 0.0)) for r in rows]
-        for metric_key, label in metric_lines:
+        for metric_idx, (metric_key, label) in enumerate(metric_lines):
             ys = [
                 (float(r.get(metric_key, 0.0)) / max(int(r.get("questions", 0)), 1))
                 for r in rows
             ]
-            ax.plot(xs, ys, marker="o", label=label)
+            line = ax.plot(xs, ys, marker="o", label=label)[0]
+            for x_val, y_val in zip(xs, ys):
+                ax.annotate(
+                    f"{y_val:.2f}",
+                    (x_val, y_val),
+                    textcoords="offset points",
+                    xytext=(0, 6 + metric_idx * 2),
+                    ha="center",
+                    fontsize=7,
+                    color=line.get_color(),
+                )
         ax.set_title(f"Retrieval Metrics vs {xlabel}")
         ax.set_xlabel(xlabel)
         ax.set_ylabel("Rate")
@@ -956,7 +966,17 @@ def build_line_plots(run_dir: Path, run_summaries: list[dict], dynamic_topk_rati
 
         fig, ax = plt.subplots(figsize=(9, 5))
         ys_dyn = [float(r.get("avg_dynamic_k", 0.0)) for r in rows]
-        ax.plot(xs, ys_dyn, marker="o", label="Avg Dynamic-K")
+        line = ax.plot(xs, ys_dyn, marker="o", label="Avg Dynamic-K")[0]
+        for x_val, y_val in zip(xs, ys_dyn):
+            ax.annotate(
+                f"{y_val:.2f}",
+                (x_val, y_val),
+                textcoords="offset points",
+                xytext=(0, 6),
+                ha="center",
+                fontsize=8,
+                color=line.get_color(),
+            )
         ax.set_title(f"Average Dynamic-K vs {xlabel} (r={dynamic_topk_ratio:.2f})")
         ax.set_xlabel(xlabel)
         ax.set_ylabel("Average Dynamic-K")
@@ -1125,7 +1145,8 @@ def main() -> None:
             gold_chunk = str(gold.get("gold_chunk", ""))
             gold_chunk_ids = list(gold.get("gold_chunk_ids", []))
 
-            eval_rows = rerank_rows[:max_eval_k]
+            eval_limit = max(max_eval_k, len(gold_chunk_ids))
+            eval_rows = rerank_rows[:eval_limit]
             hit_map = {k: 0 for k in eval_topks}
             top1_matched_chunk_ids = []
             dynamic_by_ratio = {f"{ratio:.4f}": {"k": 0, "hit": 0} for ratio in dynamic_topk_ratios}
@@ -1133,12 +1154,17 @@ def main() -> None:
                 for rr in eval_rows:
                     rr["matched_chunk_ids"] = match_preview_to_chunk_ids(rr.get("preview", ""), chunk_catalog)
                 top1_matched_chunk_ids = eval_rows[0].get("matched_chunk_ids", [])
+                gold_chunk_id_set = set(gold_chunk_ids)
                 for k in eval_topks:
-                    considered = eval_rows[:k]
-                    hit_map[k] = 1 if any(
-                        any(cid in gold_chunk_ids for cid in rr.get("matched_chunk_ids", []))
+                    window_k = max(k, len(gold_chunk_id_set))
+                    considered = eval_rows[:window_k]
+                    covered_chunk_ids = {
+                        cid
                         for rr in considered
-                    ) else 0
+                        for cid in rr.get("matched_chunk_ids", [])
+                        if cid in gold_chunk_id_set
+                    }
+                    hit_map[k] = 1 if gold_chunk_id_set.issubset(covered_chunk_ids) else 0
                 max_score = eval_rows[0].get("score")
                 if isinstance(max_score, (int, float)):
                     max_score_f = float(max_score)
@@ -1149,10 +1175,13 @@ def main() -> None:
                             if isinstance(rr.get("score"), (int, float)) and float(rr.get("score")) >= threshold
                         ]
                         dynamic_k = len(dynamic_rows)
-                        dynamic_hit = 1 if any(
-                            any(cid in gold_chunk_ids for cid in rr.get("matched_chunk_ids", []))
+                        dynamic_covered_chunk_ids = {
+                            cid
                             for rr in dynamic_rows
-                        ) else 0
+                            for cid in rr.get("matched_chunk_ids", [])
+                            if cid in gold_chunk_id_set
+                        }
+                        dynamic_hit = 1 if gold_chunk_id_set.issubset(dynamic_covered_chunk_ids) else 0
                         dynamic_by_ratio[f"{ratio:.4f}"] = {"k": dynamic_k, "hit": dynamic_hit}
 
             first_ratio_key = f"{dynamic_topk_ratios[0]:.4f}"
