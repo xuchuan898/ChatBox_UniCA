@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dynamic-topk-ratio",
         type=str,
-        default="0.5,0.6,0.7,0.8,0.9",
+        default="0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9",
         help=(
             "Comma-separated dynamic top-k ratios. "
             "For each ratio r, keep candidates with score >= r * max_score."

@@ -36,6 +36,15 @@ def parse_args() -> argparse.Namespace:
         help="Question file path.",
     )
     parser.add_argument(
+        "--gold-file",
+        type=Path,
+        default=None,
+        help=(
+            "Optional gold file for layered retrieval scoring. "
+            "If provided, the script computes gold-hit metrics from rerank top-k rows."
+        ),
+    )
+    parser.add_argument(
         "--alphas",
         type=float,
         nargs="*",
@@ -47,6 +56,18 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=5,
         help="Top-k rows to keep in details (default: 5).",
+    )
+    parser.add_argument(
+        "--layer1-k",
+        type=int,
+        default=5,
+        help="First evaluation layer size for layered scoring (default: 5).",
+    )
+    parser.add_argument(
+        "--layer2-k",
+        type=int,
+        default=8,
+        help="Second evaluation layer size for layered scoring (default: 8).",
     )
     parser.add_argument(
         "--output-dir",
@@ -270,13 +291,26 @@ def parse_retrieval_block(block: str, top_k: int) -> dict:
         if not cells or cells[0].lower() == "rank":
             continue
         if section == "rerank" and len(cells) >= 6:
+            if len(cells) >= 7:
+                chunk_id_cell = cells[1]
+                score_cell = cells[2]
+                source_cell = cells[3]
+                chunk_type_cell = cells[5]
+                preview_cell = cells[6]
+            else:
+                chunk_id_cell = ""
+                score_cell = cells[1]
+                source_cell = cells[2]
+                chunk_type_cell = cells[4]
+                preview_cell = cells[5]
             rerank_rows.append(
                 {
                     "rank": int(cells[0]),
-                    "score": float(cells[1]),
-                    "source": cells[2],
-                    "chunk_type": cells[4],
-                    "preview": cells[5],
+                    "chunk_id": int(chunk_id_cell) if chunk_id_cell not in {"", "-", "unknown"} else None,
+                    "score": float(score_cell),
+                    "source": source_cell,
+                    "chunk_type": chunk_type_cell,
+                    "preview": preview_cell,
                 }
             )
 
@@ -285,6 +319,141 @@ def parse_retrieval_block(block: str, top_k: int) -> dict:
 
 def _md_escape(text: str) -> str:
     return text.replace("|", "\\|").replace("`", "'")
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]+", " ", (text or "").casefold())).strip()
+
+
+def load_gold_index(gold_file: Path) -> dict[str, list[dict]]:
+    raw = json.loads(gold_file.read_text(encoding="utf-8"))
+    items = raw.get("items", []) if isinstance(raw, dict) else raw
+    index: dict[str, list[dict]] = {}
+    for item in items:
+        question = str(item.get("question", "")).strip()
+        if not question:
+            continue
+        index.setdefault(_normalize_text(question), []).append(item)
+    return index
+
+
+def _gold_ids_from_item(item: dict) -> list[int]:
+    raw_ids = item.get("gold_chunk_ids") or item.get("gold_chunks_ids") or []
+    ids: list[int] = []
+    for value in raw_ids:
+        try:
+            ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(ids))
+
+
+def _gold_texts_from_item(item: dict) -> list[str]:
+    texts: list[str] = []
+    gold_chunk = item.get("gold_chunk")
+    if gold_chunk:
+        texts.append(str(gold_chunk))
+    gold_chunks_full = item.get("gold_chunks_full")
+    if isinstance(gold_chunks_full, list):
+        texts.extend(str(v) for v in gold_chunks_full if v)
+    return [t for t in texts if t.strip()]
+
+
+def _row_matches_gold_text(row: dict, gold_texts: list[str]) -> bool:
+    if not gold_texts:
+        return False
+    row_text = _normalize_text(f"{row.get('source', '')} {row.get('chunk_type', '')} {row.get('preview', '')}")
+    for gold_text in gold_texts:
+        gold_norm = _normalize_text(gold_text)
+        if not gold_norm:
+            continue
+        if gold_norm in row_text or row_text in gold_norm:
+            return True
+    return False
+
+
+def score_layered_hits(rerank_rows: list[dict], gold_item: dict | None, layer1_k: int, layer2_k: int) -> dict:
+    if not gold_item:
+        return {
+            "gold_total": None,
+            "gold_hits_top_layer1": None,
+            "gold_hits_layer2": None,
+            "gold_hits_total": None,
+            "gold_layered_score": None,
+            "gold_full_recall": None,
+            "gold_layer1_recall": None,
+            "gold_layer2_recall": None,
+            "gold_hit_ids": "",
+        }
+
+    gold_ids = _gold_ids_from_item(gold_item)
+    gold_texts = _gold_texts_from_item(gold_item)
+    gold_total = len(gold_ids) if gold_ids else len(gold_texts)
+    if gold_total <= 0:
+        return {
+            "gold_total": 0,
+            "gold_hits_top_layer1": 0,
+            "gold_hits_layer2": 0,
+            "gold_hits_total": 0,
+            "gold_layered_score": 0.0,
+            "gold_full_recall": 0.0,
+            "gold_layer1_recall": 0.0,
+            "gold_layer2_recall": 0.0,
+            "gold_hit_ids": "",
+        }
+
+    hit_ids: list[str] = []
+    top_layer1_hits: set[int] = set()
+    layer2_hits: set[int] = set()
+    total_hits: set[int] = set()
+    text_hits_top_layer1 = 0
+    text_hits_layer2 = 0
+    text_hits_total = 0
+
+    for row in rerank_rows:
+        rank = int(row.get("rank") or 0)
+        chunk_id = row.get("chunk_id")
+        matched = False
+
+        if gold_ids and chunk_id is not None and int(chunk_id) in gold_ids:
+            matched = True
+            total_hits.add(int(chunk_id))
+            hit_ids.append(str(int(chunk_id)))
+            if rank <= layer1_k:
+                top_layer1_hits.add(int(chunk_id))
+            if layer1_k < rank <= layer2_k:
+                layer2_hits.add(int(chunk_id))
+        elif not gold_ids and _row_matches_gold_text(row, gold_texts):
+            matched = True
+            if rank <= layer1_k:
+                text_hits_top_layer1 += 1
+            if layer1_k < rank <= layer2_k:
+                text_hits_layer2 += 1
+            text_hits_total += 1
+
+        if matched and gold_ids:
+            continue
+
+    if gold_ids:
+        gold_hits_top_layer1 = len(top_layer1_hits)
+        gold_hits_layer2 = len(layer2_hits)
+        gold_hits_total = len(total_hits)
+    else:
+        gold_hits_top_layer1 = text_hits_top_layer1
+        gold_hits_layer2 = text_hits_layer2
+        gold_hits_total = text_hits_total
+
+    return {
+        "gold_total": gold_total,
+        "gold_hits_top_layer1": gold_hits_top_layer1,
+        "gold_hits_layer2": gold_hits_layer2,
+        "gold_hits_total": gold_hits_total,
+        "gold_layered_score": round(gold_hits_total / gold_total, 4),
+        "gold_full_recall": round(gold_hits_total / gold_total, 4),
+        "gold_layer1_recall": round(gold_hits_top_layer1 / gold_total, 4),
+        "gold_layer2_recall": round(gold_hits_layer2 / gold_total, 4),
+        "gold_hit_ids": ",".join(hit_ids),
+    }
 
 
 def write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
@@ -306,7 +475,15 @@ def summarize_rows(rows: list[dict]) -> dict:
     }
 
 
-def build_summary_md(run_dir: Path, summary_rows: list[dict], baseline_alpha: float, top_k: int) -> None:
+def build_summary_md(
+    run_dir: Path,
+    summary_rows: list[dict],
+    baseline_alpha: float,
+    top_k: int,
+    gold_enabled: bool = False,
+    layer1_k: int = 5,
+    layer2_k: int = 8,
+) -> None:
     lines = [
         "# Rerank Alpha Experiment Summary",
         "",
@@ -315,10 +492,19 @@ def build_summary_md(run_dir: Path, summary_rows: list[dict], baseline_alpha: fl
         f"- Variant mode: `mapped_current`",
         f"- Rerank details shown per question: Top-{top_k}",
         f"- Baseline alpha: `{baseline_alpha:.2f}`",
+    ]
+    if gold_enabled:
+        lines.extend(
+            [
+                f"- Gold scoring: layer1=`top-{layer1_k}`, layer2=`top-{layer2_k}`, score=`hits_total / gold_total`",
+                f"- 金标准评分 / Gold scoring (EN): first check top-{layer1_k}, then use ranks {layer1_k + 1}-{layer2_k} to complete remaining golds.",
+            ]
+        )
+    lines.extend([
         "",
         "| Alpha | Questions | Avg Top1 Score | Avg Margin(1-2) | Unique Top1 Chunks | Top1 Changed vs Baseline |",
         "| ---: | ---: | ---: | ---: | ---: | ---: |",
-    ]
+    ])
     for row in summary_rows:
         lines.append(
             f"| {row['alpha']:.2f} | {row['questions']} | {row['avg_rerank_top1_score']:.4f} | "
@@ -328,7 +514,13 @@ def build_summary_md(run_dir: Path, summary_rows: list[dict], baseline_alpha: fl
     (run_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def build_details_md(run_dir: Path, questions: list[str], run_payloads: list[dict], top_k: int) -> None:
+def build_details_md(
+    run_dir: Path,
+    questions: list[str],
+    run_payloads: list[dict],
+    top_k: int,
+    gold_enabled: bool = False,
+) -> None:
     lines = [
         "# Rerank Alpha Details",
         "",
@@ -367,17 +559,32 @@ def build_details_md(run_dir: Path, questions: list[str], run_payloads: list[dic
             else:
                 lines.append("1. `_No variant captured_`")
             lines.append("")
+            if gold_enabled:
+                gold = run.get("gold_rows", [])
+                gold_row = gold[q_idx - 1] if q_idx - 1 < len(gold) else None
+                if gold_row:
+                    lines.append(
+                        f"- Gold score: `{gold_row.get('gold_layered_score', 0.0):.4f}` "
+                        f"({gold_row.get('gold_hits_total', 0)}/{gold_row.get('gold_total', 0)})"
+                    )
+                    hit_ids = str(gold_row.get('gold_hit_ids', '')) or '-'
+                    lines.append(
+                        f"- Gold layer1 hits: `{gold_row.get('gold_hits_top_layer1', 0)}` | "
+                        f"layer2 hits: `{gold_row.get('gold_hits_layer2', 0)}` | "
+                        f"hit ids: `{_md_escape(hit_ids)}`"
+                    )
+                    lines.append("")
             lines.append(f"Rerank Top-{top_k}:")
-            lines.append("| Rank | Score | Source | Chunk Type | Preview |")
-            lines.append("| ---: | ---: | --- | --- | --- |")
+            lines.append("| Rank | Chunk ID | Score | Source | Chunk Type | Preview |")
+            lines.append("| ---: | ---: | ---: | --- | --- | --- |")
             if block.get("rerank_rows"):
                 for row in block["rerank_rows"]:
                     lines.append(
-                        f"| {row['rank']} | {row['score']:.4f} | {_md_escape(row['source'])} | "
+                        f"| {row['rank']} | {row.get('chunk_id', '')} | {row['score']:.4f} | {_md_escape(row['source'])} | "
                         f"{_md_escape(row['chunk_type'])} | {_md_escape(row['preview'])} |"
                     )
             else:
-                lines.append("| - | - | - | - | _No rerank rows captured_ |")
+                lines.append("| - | - | - | - | - | _No rerank rows captured_ |")
             lines.append("")
 
     (run_dir / "details.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -399,6 +606,10 @@ def main() -> None:
         raise FileNotFoundError(f"chat_box.py not found: {chat_box_path}")
     if args.top_k <= 0:
         raise ValueError("--top-k must be > 0")
+    if args.layer1_k <= 0 or args.layer2_k <= 0:
+        raise ValueError("--layer1-k and --layer2-k must be > 0")
+    if args.layer1_k > args.layer2_k:
+        raise ValueError("--layer1-k must be <= --layer2-k")
 
     alphas = sorted(set(args.alphas))
     if not alphas:
@@ -411,6 +622,14 @@ def main() -> None:
     if not questions:
         raise ValueError(f"No valid questions in {question_file}")
 
+    gold_index = {}
+    gold_file = None
+    if args.gold_file is not None:
+        gold_file = resolve_path(project_root, args.gold_file).resolve()
+        if not gold_file.exists():
+            raise FileNotFoundError(f"Gold file not found: {gold_file}")
+        gold_index = load_gold_index(gold_file)
+
     ollama_info = ensure_ollama(args)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = output_base / f"rerank_alpha_experiment_{run_id}"
@@ -422,6 +641,9 @@ def main() -> None:
 
     print(f"[INFO] Doc file: {doc_file}", flush=True)
     print(f"[INFO] Question file: {question_file}", flush=True)
+    if gold_file:
+        print(f"[INFO] Gold file: {gold_file}", flush=True)
+        print(f"[INFO] Gold layers: top-{args.layer1_k} + top-{args.layer2_k}", flush=True)
     print(f"[INFO] Alphas: {alphas}", flush=True)
     print(f"[INFO] Output dir: {run_dir}", flush=True)
     print(f"[INFO] Ollama ready: {ollama_info['ready']}", flush=True)
@@ -463,11 +685,13 @@ def main() -> None:
         print(f"[RUN {idx}/{len(alphas)}] exit={proc.returncode} duration={duration_sec:.2f}s", flush=True)
 
         log_text = log_path.read_text(encoding="utf-8", errors="ignore")
-        retrieval_blocks = [parse_retrieval_block(b, args.top_k) for b in extract_retrieval_markdown_blocks(log_text)]
+        parse_top_k = max(args.top_k, args.layer2_k)
+        retrieval_blocks = [parse_retrieval_block(b, parse_top_k) for b in extract_retrieval_markdown_blocks(log_text)]
         variant_events = extract_query_variant_events(log_text)
         dual_events = extract_dual_query_events(log_text)
 
         rows_for_alpha = []
+        gold_rows_for_alpha = []
         for q_idx, question in enumerate(questions, start=1):
             lang = detect_question_language(question)
             block = retrieval_blocks[q_idx - 1] if q_idx - 1 < len(retrieval_blocks) else {"rerank_rows": []}
@@ -483,6 +707,18 @@ def main() -> None:
             if top1 and top2:
                 margin = round(top1["score"] - top2["score"], 4)
 
+            gold_item = None
+            gold_key = _normalize_text(question)
+            candidates = gold_index.get(gold_key, [])
+            if candidates:
+                if len(candidates) == 1:
+                    gold_item = candidates[0]
+                else:
+                    lang_candidates = [item for item in candidates if str(item.get("lang", "")).strip().lower() == lang]
+                    gold_item = lang_candidates[0] if lang_candidates else candidates[0]
+
+            gold_metrics = score_layered_hits(rerank_rows, gold_item, args.layer1_k, args.layer2_k)
+
             row = {
                 "alpha": alpha,
                 "q_id": q_idx,
@@ -496,9 +732,11 @@ def main() -> None:
                 "rerank_top1_chunk_type": top1["chunk_type"] if top1 else "",
                 "rerank_top1_preview": top1["preview"] if top1 else "",
                 "rerank_margin_top1_top2": margin,
+                **gold_metrics,
             }
             rows_for_alpha.append(row)
             question_level_rows.append(row.copy())
+            gold_rows_for_alpha.append(gold_metrics)
 
         summary = summarize_rows(rows_for_alpha)
         summary.update(
@@ -510,6 +748,22 @@ def main() -> None:
                 "questions_expected": len(questions),
             }
         )
+        if gold_index:
+            summary["avg_gold_total"] = round(
+                statistics.mean([r["gold_total"] for r in gold_rows_for_alpha if r["gold_total"] is not None]), 4
+            ) if any(r["gold_total"] is not None for r in gold_rows_for_alpha) else 0.0
+            summary["avg_gold_hits_total"] = round(
+                statistics.mean([r["gold_hits_total"] for r in gold_rows_for_alpha if r["gold_hits_total"] is not None]), 4
+            ) if any(r["gold_hits_total"] is not None for r in gold_rows_for_alpha) else 0.0
+            summary["avg_gold_layered_score"] = round(
+                statistics.mean([r["gold_layered_score"] for r in gold_rows_for_alpha if r["gold_layered_score"] is not None]), 4
+            ) if any(r["gold_layered_score"] is not None for r in gold_rows_for_alpha) else 0.0
+            summary["avg_gold_layer1_recall"] = round(
+                statistics.mean([r["gold_layer1_recall"] for r in gold_rows_for_alpha if r["gold_layer1_recall"] is not None]), 4
+            ) if any(r["gold_layer1_recall"] is not None for r in gold_rows_for_alpha) else 0.0
+            summary["avg_gold_layer2_recall"] = round(
+                statistics.mean([r["gold_layer2_recall"] for r in gold_rows_for_alpha if r["gold_layer2_recall"] is not None]), 4
+            ) if any(r["gold_layer2_recall"] is not None for r in gold_rows_for_alpha) else 0.0
         summary_rows.append(summary)
 
         run_payloads.append(
@@ -522,6 +776,7 @@ def main() -> None:
                 "retrieval_blocks": retrieval_blocks,
                 "variant_events": variant_events,
                 "dual_query_events": dual_events,
+                "gold_rows": gold_rows_for_alpha,
                 "summary": summary,
             }
         )
@@ -558,6 +813,11 @@ def main() -> None:
             "avg_rerank_margin_top1_top2",
             "unique_top1_chunks",
             "top1_changed_rate_vs_baseline",
+            "avg_gold_total",
+            "avg_gold_hits_total",
+            "avg_gold_layered_score",
+            "avg_gold_layer1_recall",
+            "avg_gold_layer2_recall",
         ],
     )
 
@@ -578,6 +838,15 @@ def main() -> None:
             "rerank_top1_preview",
             "rerank_margin_top1_top2",
             "top1_changed_vs_baseline",
+            "gold_total",
+            "gold_hits_top_layer1",
+            "gold_hits_layer2",
+            "gold_hits_total",
+            "gold_layered_score",
+            "gold_full_recall",
+            "gold_layer1_recall",
+            "gold_layer2_recall",
+            "gold_hit_ids",
         ],
     )
 
@@ -588,6 +857,9 @@ def main() -> None:
                 "doc_file": str(doc_file),
                 "question_file": str(question_file),
                 "top_k": args.top_k,
+                "gold_file": str(gold_file) if gold_file else None,
+                "layer1_k": args.layer1_k,
+                "layer2_k": args.layer2_k,
                 "fixed_weights": {
                     "weight_vec": 1.25,
                     "weight_bm25": 0.75,
@@ -603,8 +875,8 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    build_summary_md(run_dir, summary_rows, baseline_alpha, args.top_k)
-    build_details_md(run_dir, questions, run_payloads, args.top_k)
+    build_summary_md(run_dir, summary_rows, baseline_alpha, args.top_k, bool(gold_index), args.layer1_k, args.layer2_k)
+    build_details_md(run_dir, questions, run_payloads, args.top_k, bool(gold_index))
 
     print("[INFO] Alpha experiment finished.", flush=True)
     print(f"[INFO] Summary: {run_dir / 'summary.md'}", flush=True)

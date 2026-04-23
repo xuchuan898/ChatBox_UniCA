@@ -45,5 +45,5 @@ python experiments/run_format_experiment.py \
   --docs docs/chroma/master.md \
   --question-file questions/questions_batch_student_short_typo_en_fr.txt \
   --gold-file questions/questions_batch_student_short_typo_en_fr_gold.json \
-  --dynamic-topk-ratio 0.90 \
+  --dynamic-topk-ratio 0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9 \
   "$@"

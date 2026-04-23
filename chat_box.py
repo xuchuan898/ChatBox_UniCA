@@ -369,6 +369,9 @@ def _adaptive_split_documents(docs: List[Document], debug: bool = False, save_ch
             else:
                 final_chunks.append(para_doc)
 
+    for idx, chunk in enumerate(final_chunks):
+        chunk.metadata["chunk_id"] = idx
+
     if debug:
         print(f"[DEBUG] Adaptive split: total chunks = {len(final_chunks)}")
         if final_chunks:
@@ -577,25 +580,27 @@ def _print_retrieval_markdown(question: str, base_scored: list[tuple[Document, f
     print("")
 
     print(f"#### Base Retrieval (All {len(base_scored)})")
-    print("| Rank | Score | Source | Type | Chunk Type | Preview |")
-    print("| ---: | ---: | --- | --- | --- | --- |")
+    print("| Rank | Chunk ID | Score | Source | Type | Chunk Type | Preview |")
+    print("| ---: | ---: | ---: | --- | --- | --- | --- |")
     for idx, (doc, score) in enumerate(base_scored, 1):
+        chunk_id = _md_escape(str(doc.metadata.get("chunk_id", "unknown")))
         source = _md_escape(_short_source(doc))
         source_type = _md_escape(str(doc.metadata.get("source_type", "unknown")))
         chunk_type = _md_escape(str(doc.metadata.get("chunk_type", "unknown")))
         preview = _md_escape(_compact_preview(doc.page_content))
-        print(f"| {idx} | {score:.4f} | {source} | {source_type} | {chunk_type} | {preview} |")
+        print(f"| {idx} | {chunk_id} | {score:.4f} | {source} | {source_type} | {chunk_type} | {preview} |")
 
     print("")
     print(f"#### Rerank Result (All {len(reranked_scored)})")
-    print("| Rank | Rerank Score | Source | Type | Chunk Type | Preview |")
-    print("| ---: | ---: | --- | --- | --- | --- |")
+    print("| Rank | Chunk ID | Rerank Score | Source | Type | Chunk Type | Preview |")
+    print("| ---: | ---: | ---: | --- | --- | --- | --- |")
     for idx, (doc, score) in enumerate(reranked_scored, 1):
+        chunk_id = _md_escape(str(doc.metadata.get("chunk_id", "unknown")))
         source = _md_escape(_short_source(doc))
         source_type = _md_escape(str(doc.metadata.get("source_type", "unknown")))
         chunk_type = _md_escape(str(doc.metadata.get("chunk_type", "unknown")))
         preview = _md_escape(_compact_preview(doc.page_content))
-        print(f"| {idx} | {score:.4f} | {source} | {source_type} | {chunk_type} | {preview} |")
+        print(f"| {idx} | {chunk_id} | {score:.4f} | {source} | {source_type} | {chunk_type} | {preview} |")
 
     print("[DEBUG][RETRIEVE_MD_END]")
 
@@ -854,7 +859,7 @@ def chatbox(
         merged_scored = _weighted_rrf_fusion(ranked_lists, k=60)
 
         # 3. Keep top candidates before rerank.
-        base_scored = merged_scored[:60] if len(merged_scored) > 60 else merged_scored
+        base_scored = merged_scored[:30] if len(merged_scored) > 30 else merged_scored
         candidates = [doc for doc, _ in base_scored]
 
         # 4. Rerank candidates.

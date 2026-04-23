@@ -111,7 +111,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dynamic-topk-ratio",
         type=str,
-        default="0.5,0.6,0.7,0.8,0.9",
+        default="0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9",
         help=(
             "Comma-separated dynamic top-k ratios. "
             "For each ratio r, keep candidates with score >= r * max_score."
@@ -773,7 +773,7 @@ def build_markdown_summary(
             "- Matching is strict chunk-level: rerank preview is mapped to chunk id, then compared to `gold_chunk_ids`.",
             "- Each point in a curve is aggregated over all questions in one run.",
             "- In `metrics_vs_*.png`, Y values are hit counts (not percentages). Convert to accuracy by `count / Q`.",
-            "- For dynamic-k across all ratios (0.5~0.9), use the `Dynamic-K Ratio Breakdown` table above.",
+            f"- For dynamic-k across all ratios ({dynamic_topk_ratios[0]:.1f}~{dynamic_topk_ratios[-1]:.1f}), use the `Dynamic-K Ratio Breakdown` table above.",
             "",
             "### What each figure file shows",
             "",
@@ -905,7 +905,13 @@ def build_markdown_details(
     (run_dir / "details.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def build_line_plots(run_dir: Path, run_summaries: list[dict], dynamic_topk_ratio: float) -> list[str]:
+def build_line_plots(
+    run_dir: Path,
+    run_summaries: list[dict],
+    question_rows: list[dict],
+    dynamic_topk_ratio: float,
+    dynamic_topk_ratios: list[float],
+) -> list[str]:
     try:
         import matplotlib.pyplot as plt
     except Exception:
@@ -983,6 +989,93 @@ def build_line_plots(run_dir: Path, run_summaries: list[dict], dynamic_topk_rati
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=8)
         out = plots_dir / f"avg_dynamic_k_vs_{slug}.png"
+        fig.tight_layout()
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        generated.append(str(out))
+
+    def _parse_dynamic_map(raw: object) -> dict:
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
+        return {}
+
+    # Global dynamic-ratio curve aggregated over all (run, question) rows.
+    if question_rows and dynamic_topk_ratios:
+        ratio_x = list(dynamic_topk_ratios)
+        hit_rates = []
+        avg_ks = []
+        row_count = len(question_rows)
+        for ratio in ratio_x:
+            key = f"{ratio:.4f}"
+            hit_sum = 0
+            k_sum = 0
+            for row in question_rows:
+                dyn = _parse_dynamic_map(row.get("dynamic_by_ratio", {})).get(key, {})
+                if isinstance(dyn, dict):
+                    hit_sum += int(dyn.get("hit", 0))
+                    k_sum += int(dyn.get("k", 0))
+            hit_rates.append(hit_sum / max(row_count, 1))
+            avg_ks.append(k_sum / max(row_count, 1))
+
+        fig, ax = plt.subplots(figsize=(9, 5))
+        line = ax.plot(ratio_x, hit_rates, marker="o", linewidth=2, label="Dynamic-K Accuracy")[0]
+        for x_val, y_val, k_val in zip(ratio_x, hit_rates, avg_ks):
+            ax.annotate(
+                f"K={k_val:.2f}",
+                (x_val, y_val),
+                textcoords="offset points",
+                xytext=(0, 8),
+                ha="center",
+                fontsize=8,
+                color=line.get_color(),
+            )
+        ax.set_title("Dynamic Ratio vs Accuracy")
+        ax.set_xlabel("Dynamic ratio r")
+        ax.set_ylabel("Accuracy")
+        ax.set_ylim(0.0, 1.05)
+        ax.set_xticks(ratio_x)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best", fontsize=8)
+        out = plots_dir / "dynamic_ratio_vs_accuracy.png"
+        fig.tight_layout()
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        generated.append(str(out))
+
+        fig, ax = plt.subplots(figsize=(10, 5.5))
+        line = ax.plot(ratio_x, hit_rates, marker="o", linewidth=2, label="Dynamic-K Accuracy")[0]
+        for x_val, y_val, k_val in zip(ratio_x, hit_rates, avg_ks):
+            ax.annotate(
+                f"K={k_val:.2f}",
+                (x_val, y_val),
+                textcoords="offset points",
+                xytext=(0, 8),
+                ha="center",
+                fontsize=8,
+                color=line.get_color(),
+            )
+
+        for k in range(1, 9):
+            key = f"hit_at_{k}"
+            if not any(key in row for row in question_rows):
+                continue
+            acc = sum(int(row.get(key, 0)) for row in question_rows) / max(row_count, 1)
+            ax.axhline(acc, linestyle="--", linewidth=1, alpha=0.6, label=f"Top-{k}={acc:.2f}")
+
+        ax.set_title("Dynamic Ratio vs Accuracy with Fixed Top-K Baselines")
+        ax.set_xlabel("Dynamic ratio r")
+        ax.set_ylabel("Accuracy")
+        ax.set_ylim(0.0, 1.05)
+        ax.set_xticks(ratio_x)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best", fontsize=8, ncol=2)
+        out = plots_dir / "dynamic_ratio_vs_accuracy_with_topk_baselines.png"
         fig.tight_layout()
         fig.savefig(out, dpi=150)
         plt.close(fig)
@@ -1148,6 +1241,7 @@ def main() -> None:
             eval_limit = max(max_eval_k, len(gold_chunk_ids))
             eval_rows = rerank_rows[:eval_limit]
             hit_map = {k: 0 for k in eval_topks}
+            fixed_hit_map = {k: 0 for k in range(1, 9)}
             top1_matched_chunk_ids = []
             dynamic_by_ratio = {f"{ratio:.4f}": {"k": 0, "hit": 0} for ratio in dynamic_topk_ratios}
             if eval_rows and gold_chunk_ids and chunk_catalog.get("chunks"):
@@ -1155,6 +1249,16 @@ def main() -> None:
                     rr["matched_chunk_ids"] = match_preview_to_chunk_ids(rr.get("preview", ""), chunk_catalog)
                 top1_matched_chunk_ids = eval_rows[0].get("matched_chunk_ids", [])
                 gold_chunk_id_set = set(gold_chunk_ids)
+                for k in range(1, 9):
+                    window_k = max(k, len(gold_chunk_id_set))
+                    considered = eval_rows[:window_k]
+                    covered_chunk_ids = {
+                        cid
+                        for rr in considered
+                        for cid in rr.get("matched_chunk_ids", [])
+                        if cid in gold_chunk_id_set
+                    }
+                    fixed_hit_map[k] = 1 if gold_chunk_id_set.issubset(covered_chunk_ids) else 0
                 for k in eval_topks:
                     window_k = max(k, len(gold_chunk_id_set))
                     considered = eval_rows[:window_k]
@@ -1217,11 +1321,10 @@ def main() -> None:
                 "hit_at_dynamic_k": first_dynamic.get("hit", 0),
                 "dynamic_by_ratio": json.dumps(dynamic_by_ratio, ensure_ascii=False),
             }
+            for k in range(1, 9):
+                row[f"hit_at_{k}"] = fixed_hit_map.get(k, 0)
             for k in eval_topks:
-                row[f"hit_at_{k}"] = hit_map.get(k, 0)
-            row["hit_at_1"] = hit_map.get(1, row.get("hit_at_1", 0))
-            row["hit_at_5"] = hit_map.get(5, row.get("hit_at_5", 0))
-            row["hit_at_8"] = hit_map.get(8, row.get("hit_at_8", 0))
+                row[f"hit_at_{k}"] = hit_map.get(k, row.get(f"hit_at_{k}", 0))
             per_run_rows.append(row)
             question_level_rows.append(row.copy())
 
@@ -1317,7 +1420,12 @@ def main() -> None:
             "rerank_margin_top1_top2",
             "top1_matched_chunk_ids",
             "hit_at_1",
+            "hit_at_2",
+            "hit_at_3",
+            "hit_at_4",
             "hit_at_5",
+            "hit_at_6",
+            "hit_at_7",
             "hit_at_8",
             "dynamic_k",
             "dynamic_ratio",
@@ -1382,7 +1490,9 @@ def main() -> None:
     plot_files = build_line_plots(
         run_dir=run_dir,
         run_summaries=interaction_summary_rows,
+        question_rows=question_level_rows,
         dynamic_topk_ratio=dynamic_topk_ratio,
+        dynamic_topk_ratios=dynamic_topk_ratios,
     )
 
     print("[INFO] Interaction ablation finished.", flush=True)
