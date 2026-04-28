@@ -526,6 +526,12 @@ def parse_args() -> argparse.Namespace:
             "final_score = alpha*src_query_score + (1-alpha)*translated_query_score."
         ),
     )
+    parser.add_argument(
+        "--rerank-candidates",
+        type=int,
+        default=30,
+        help="Number of candidates to keep from base retrieval and send to reranker (default: 30).",
+    )
     return parser.parse_args()
 
 
@@ -617,6 +623,7 @@ def chatbox(
     secondary_variant_weight: float = 0.85,
     variant_mode: str = "mapped_current",
     rerank_alpha: float = 0.5,
+    rerank_candidates: int = 30,
 ):
     # Deterministic LLM settings
     llm = ChatOllama(
@@ -644,13 +651,16 @@ def chatbox(
         Answer:
     """)
 
-    # Base retriever: MMR with larger candidate pool.
+    if rerank_candidates <= 0:
+        raise ValueError(f"rerank_candidates must be > 0, got: {rerank_candidates}")
+
+    # Base retriever: MMR with configurable candidate pool.
     # Keep all chunk types and apply only soft penalties later.
     base_retriever = vectordb.as_retriever(
         search_type="mmr",
         search_kwargs={
-            "k": 30,
-            "fetch_k": 50,
+            "k": rerank_candidates,
+            "fetch_k": max(rerank_candidates + 20, rerank_candidates),
             "lambda_mult": 0.7,
         }
     )
@@ -845,7 +855,7 @@ def chatbox(
         # 1. Build query variants for multilingual robustness.
         query_variants = _build_query_variants(question)
         corpus_size = len(corpus_docs)
-        bm25_k = min(30, corpus_size)
+        bm25_k = min(rerank_candidates, corpus_size)
 
         ranked_lists: list[tuple[list[Document], float]] = []
         for idx, q_variant in enumerate(query_variants):
@@ -859,7 +869,7 @@ def chatbox(
         merged_scored = _weighted_rrf_fusion(ranked_lists, k=60)
 
         # 3. Keep top candidates before rerank.
-        base_scored = merged_scored[:30] if len(merged_scored) > 30 else merged_scored
+        base_scored = merged_scored[:rerank_candidates] if len(merged_scored) > rerank_candidates else merged_scored
         candidates = [doc for doc, _ in base_scored]
 
         # 4. Rerank candidates.
@@ -886,7 +896,8 @@ def chatbox(
                 f"routes={len(ranked_lists)} merged={len(merged_scored)} answer_top_k={answer_top_k} "
                 f"weight_vec={weight_vec:.3f} weight_bm25={weight_bm25:.3f} "
                 f"secondary_variant_weight={secondary_variant_weight:.3f} "
-                f"variant_mode={variant_mode} rerank_alpha={rerank_alpha:.3f}"
+                f"variant_mode={variant_mode} rerank_alpha={rerank_alpha:.3f} "
+                f"rerank_candidates={rerank_candidates}"
             )
             for idx, q_variant in enumerate(query_variants, start=1):
                 print(f"[DEBUG][RETRIEVE][QUERY_VARIANT] {idx}={q_variant!r}")
@@ -968,6 +979,7 @@ def main() -> None:
         secondary_variant_weight=args.secondary_variant_weight,
         variant_mode=args.variant_mode,
         rerank_alpha=args.rerank_alpha,
+        rerank_candidates=args.rerank_candidates,
     )
 
     if args.question_file:

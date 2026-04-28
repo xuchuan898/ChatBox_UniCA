@@ -118,6 +118,13 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--rerank-candidates",
+        type=int,
+        nargs="*",
+        default=[30],
+        help="List of candidate counts to send to rerank stage (e.g. --rerank-candidates 10 20 30 40).",
+    )
+    parser.add_argument(
         "--top-k",
         type=int,
         default=5,
@@ -315,6 +322,10 @@ def build_run_plan(args: argparse.Namespace) -> list[dict]:
     translation_ratios = _validate_ratio_list("translation-ratios", args.translation_ratios)
     rerank_alphas = _validate_ratio_list("rerank-alphas", args.rerank_alphas)
 
+    # integer list for how many candidates to send into rerank
+    rerank_candidates_raw = args.rerank_candidates or [30]
+    rerank_candidates = sorted(set(int(x) for x in rerank_candidates_raw))
+
     fixed_bm25_ratio = round(float(args.fixed_bm25_ratio), 4)
     fixed_translation_ratio = round(float(args.fixed_translation_ratio), 4)
     fixed_rerank_alpha = round(float(args.fixed_rerank_alpha), 4)
@@ -332,72 +343,78 @@ def build_run_plan(args: argparse.Namespace) -> list[dict]:
         tr = fixed_translation_ratio
         alpha = fixed_rerank_alpha
         svw = 1.0 if args.variant_mode == "primary_only" else tr
-        run_id = (
-            f"bm25_ratio__r{_weight_slug(bm25_ratio)}"
-            f"__tr{_weight_slug(tr)}__ra{_weight_slug(alpha)}"
-        )
-        plan.append(
-            {
-                "run_id": run_id,
-                "sweep_group": "bm25_ratio",
-                "sweep_var": "bm25_ratio",
-                "sweep_value": float(bm25_ratio),
-                "weight_vec": float(1.0 - bm25_ratio),
-                "weight_bm25": float(bm25_ratio),
-                "variant_mode": args.variant_mode,
-                "secondary_variant_weight": float(svw),
-                "translation_ratio": float(tr),
-                "rerank_alpha": float(alpha),
-            }
-        )
+        for rc in rerank_candidates:
+            run_id = (
+                f"bm25_ratio__r{_weight_slug(bm25_ratio)}"
+                f"__tr{_weight_slug(tr)}__ra{_weight_slug(alpha)}__rc{rc}"
+            )
+            plan.append(
+                {
+                    "run_id": run_id,
+                    "sweep_group": "bm25_ratio",
+                    "sweep_var": "bm25_ratio",
+                    "sweep_value": float(bm25_ratio),
+                    "weight_vec": float(1.0 - bm25_ratio),
+                    "weight_bm25": float(bm25_ratio),
+                    "variant_mode": args.variant_mode,
+                    "secondary_variant_weight": float(svw),
+                    "translation_ratio": float(tr),
+                    "rerank_alpha": float(alpha),
+                    "rerank_candidates": int(rc),
+                }
+            )
 
     # B) Sweep retrieval translation ratio, fix bm25 ratio + rerank alpha.
     for tr in translation_ratios:
         bm25_ratio = fixed_bm25_ratio
         alpha = fixed_rerank_alpha
         svw = 1.0 if args.variant_mode == "primary_only" else tr
-        run_id = (
-            f"translation_ratio__r{_weight_slug(tr)}"
-            f"__bm25{_weight_slug(bm25_ratio)}__ra{_weight_slug(alpha)}"
-        )
-        plan.append(
-            {
-                "run_id": run_id,
-                "sweep_group": "translation_ratio",
-                "sweep_var": "translation_ratio",
-                "sweep_value": float(tr),
-                "weight_vec": float(1.0 - bm25_ratio),
-                "weight_bm25": float(bm25_ratio),
-                "variant_mode": args.variant_mode,
-                "secondary_variant_weight": float(svw),
-                "translation_ratio": float(tr),
-                "rerank_alpha": float(alpha),
-            }
-        )
+        for rc in rerank_candidates:
+            run_id = (
+                f"translation_ratio__r{_weight_slug(tr)}"
+                f"__bm25{_weight_slug(bm25_ratio)}__ra{_weight_slug(alpha)}__rc{rc}"
+            )
+            plan.append(
+                {
+                    "run_id": run_id,
+                    "sweep_group": "translation_ratio",
+                    "sweep_var": "translation_ratio",
+                    "sweep_value": float(tr),
+                    "weight_vec": float(1.0 - bm25_ratio),
+                    "weight_bm25": float(bm25_ratio),
+                    "variant_mode": args.variant_mode,
+                    "secondary_variant_weight": float(svw),
+                    "translation_ratio": float(tr),
+                    "rerank_alpha": float(alpha),
+                    "rerank_candidates": int(rc),
+                }
+            )
 
     # C) Sweep rerank translation alpha, fix bm25 ratio + retrieval translation ratio.
     for alpha in rerank_alphas:
         bm25_ratio = fixed_bm25_ratio
         tr = fixed_translation_ratio
         svw = 1.0 if args.variant_mode == "primary_only" else tr
-        run_id = (
-            f"rerank_alpha__r{_weight_slug(alpha)}"
-            f"__bm25{_weight_slug(bm25_ratio)}__tr{_weight_slug(tr)}"
-        )
-        plan.append(
-            {
-                "run_id": run_id,
-                "sweep_group": "rerank_alpha",
-                "sweep_var": "rerank_alpha",
-                "sweep_value": float(alpha),
-                "weight_vec": float(1.0 - bm25_ratio),
-                "weight_bm25": float(bm25_ratio),
-                "variant_mode": args.variant_mode,
-                "secondary_variant_weight": float(svw),
-                "translation_ratio": float(tr),
-                "rerank_alpha": float(alpha),
-            }
-        )
+        for rc in rerank_candidates:
+            run_id = (
+                f"rerank_alpha__r{_weight_slug(alpha)}"
+                f"__bm25{_weight_slug(bm25_ratio)}__tr{_weight_slug(tr)}__rc{rc}"
+            )
+            plan.append(
+                {
+                    "run_id": run_id,
+                    "sweep_group": "rerank_alpha",
+                    "sweep_var": "rerank_alpha",
+                    "sweep_value": float(alpha),
+                    "weight_vec": float(1.0 - bm25_ratio),
+                    "weight_bm25": float(bm25_ratio),
+                    "variant_mode": args.variant_mode,
+                    "secondary_variant_weight": float(svw),
+                    "translation_ratio": float(tr),
+                    "rerank_alpha": float(alpha),
+                    "rerank_candidates": int(rc),
+                }
+            )
     return plan
 
 
@@ -451,6 +468,30 @@ def parse_retrieval_block(block: str) -> dict:
     base_rows = []
     rerank_rows = []
 
+    def _parse_row(cells: list[str], is_rerank: bool) -> dict | None:
+        if len(cells) >= 7:
+            return {
+                "rank": int(cells[0]),
+                "chunk_id": int(cells[1]) if cells[1] not in {"", "-", "unknown"} else None,
+                "score": float(cells[2]),
+                "source": cells[3],
+                "source_type": cells[4],
+                "chunk_type": cells[5],
+                "preview": cells[6],
+            }
+        if len(cells) >= 6:
+            # Backward compatibility for older logs that omitted Chunk ID.
+            return {
+                "rank": int(cells[0]),
+                "chunk_id": None,
+                "score": float(cells[1]),
+                "source": cells[2],
+                "source_type": cells[3] if not is_rerank else cells[3],
+                "chunk_type": cells[4],
+                "preview": cells[5],
+            }
+        return None
+
     for raw_line in block.splitlines():
         line = raw_line.rstrip()
         q_match = re.match(r"^- Question:\s*`(.*)`\s*$", line)
@@ -470,28 +511,14 @@ def parse_retrieval_block(block: str) -> dict:
         cells = _parse_table_row(line)
         if not cells or cells[0].lower() == "rank":
             continue
-        if section == "base" and len(cells) >= 6:
-            base_rows.append(
-                {
-                    "rank": int(cells[0]),
-                    "score": float(cells[1]),
-                    "source": cells[2],
-                    "source_type": cells[3],
-                    "chunk_type": cells[4],
-                    "preview": cells[5],
-                }
-            )
-        elif section == "rerank" and len(cells) >= 6:
-            rerank_rows.append(
-                {
-                    "rank": int(cells[0]),
-                    "score": float(cells[1]),
-                    "source": cells[2],
-                    "source_type": cells[3],
-                    "chunk_type": cells[4],
-                    "preview": cells[5],
-                }
-            )
+        if section == "base":
+            row = _parse_row(cells, is_rerank=False)
+            if row is not None:
+                base_rows.append(row)
+        elif section == "rerank":
+            row = _parse_row(cells, is_rerank=True)
+            if row is not None:
+                rerank_rows.append(row)
 
     return {
         "question": question,
@@ -684,13 +711,13 @@ def build_markdown_summary(
         "",
         "## Run Configs",
         "",
-        "| Run ID | Sweep | Value | Variant Mode | w_vec | w_bm25 | Translation Ratio | Rerank Alpha |",
-        "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |",
+        "| Run ID | Sweep | Value | Variant Mode | w_vec | w_bm25 | Translation Ratio | Rerank Alpha | Rerank Candidates |",
+        "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in run_summaries:
         lines.append(
             f"| {row['run_id']} | {row['sweep_group']} | {row['sweep_value']:.2f} | {row['variant_mode']} | "
-            f"{row['weight_vec']:.2f} | {row['weight_bm25']:.2f} | {row['translation_ratio']:.2f} | {row['rerank_alpha']:.2f} |"
+            f"{row['weight_vec']:.2f} | {row['weight_bm25']:.2f} | {row['translation_ratio']:.2f} | {row['rerank_alpha']:.2f} | {row.get('rerank_candidates', '')} |"
         )
 
     lines.extend(
@@ -714,7 +741,7 @@ def build_markdown_summary(
         hd_pct = (hd / q) * 100.0
         lines.append(
             f"| {row['run_id']} | {row['sweep_group']} | {row['sweep_value']:.2f} | {row['variant_mode']} | "
-            f"{row['weight_vec']:.2f} | {row['weight_bm25']:.2f} | {row['translation_ratio']:.2f} | {row['rerank_alpha']:.2f} | "
+            f"{row['weight_vec']:.2f} | {row['weight_bm25']:.2f} | {row['translation_ratio']:.2f} | {row['rerank_alpha']:.2f} | {row.get('rerank_candidates', '')} | "
             f"{h1}/{q} ({h1_pct:.2f}%) | {h5}/{q} ({h5_pct:.2f}%) | {h8}/{q} ({h8_pct:.2f}%) | "
             f"{hd}/{q} ({hd_pct:.2f}%) | {row.get('avg_dynamic_k', 0.0):.2f} | "
             f"{row['avg_rerank_top1_score']:.4f} | {row['avg_rerank_margin_top1_top2']:.4f} |"
@@ -783,6 +810,8 @@ def build_markdown_summary(
             "- `plots/avg_dynamic_k_vs_bm25_ratio.png`: X is BM25 ratio; Y is average dynamic-K.",
             "- `plots/avg_dynamic_k_vs_translation_ratio.png`: X is translation ratio; Y is average dynamic-K.",
             "- `plots/avg_dynamic_k_vs_rerank_alpha.png`: X is rerank alpha; Y is average dynamic-K.",
+            "- `plots/metrics_vs_rerank_candidates_*.png`: X is number of candidates sent to rerank; Y is metric rate.",
+            "- `plots/avg_dynamic_k_vs_rerank_candidates.png`: X is number of candidates sent to rerank; Y is average dynamic-K.",
             "",
             "## Artifacts",
             "",
@@ -994,6 +1023,58 @@ def build_line_plots(
         plt.close(fig)
         generated.append(str(out))
 
+    # New: analyze effect of number of rerank candidates if present
+    rc_values = sorted({int(r.get("rerank_candidates", 0)) for r in run_summaries if r.get("rerank_candidates")})
+    if rc_values:
+        xs = rc_values
+        for metric_idx, (metric_key, label) in enumerate(metric_lines):
+            ys = []
+            for rc in xs:
+                rows = [r for r in run_summaries if int(r.get("rerank_candidates", 0)) == rc]
+                if not rows:
+                    ys.append(0.0)
+                    continue
+                val = sum(int(r.get(metric_key, 0)) for r in rows) / max(sum(int(r.get("questions", 0)) for r in rows), 1)
+                ys.append(val)
+            fig, ax = plt.subplots(figsize=(8, 4))
+            line = ax.plot(xs, ys, marker="o", label=label)[0]
+            for x_val, y_val in zip(xs, ys):
+                ax.annotate(f"{y_val:.2f}", (x_val, y_val), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8, color=line.get_color())
+            ax.set_title(f"{label} vs Rerank Candidates")
+            ax.set_xlabel("Rerank candidates")
+            ax.set_ylabel("Rate")
+            ax.set_ylim(0.0, 1.05)
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc="best", fontsize=8)
+            out = plots_dir / f"metrics_vs_rerank_candidates_{metric_key}.png"
+            fig.tight_layout()
+            fig.savefig(out, dpi=150)
+            plt.close(fig)
+            generated.append(str(out))
+
+        # Avg dynamic k vs rerank candidates
+        ys_dyn = []
+        for rc in xs:
+            rows = [r for r in run_summaries if int(r.get("rerank_candidates", 0)) == rc]
+            if not rows:
+                ys_dyn.append(0.0)
+            else:
+                ys_dyn.append(sum(float(r.get("avg_dynamic_k", 0.0)) for r in rows) / len(rows))
+        fig, ax = plt.subplots(figsize=(8, 4))
+        line = ax.plot(xs, ys_dyn, marker="o", label="Avg Dynamic-K")[0]
+        for x_val, y_val in zip(xs, ys_dyn):
+            ax.annotate(f"{y_val:.2f}", (x_val, y_val), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8, color=line.get_color())
+        ax.set_title("Average Dynamic-K vs Rerank Candidates")
+        ax.set_xlabel("Rerank candidates")
+        ax.set_ylabel("Average Dynamic-K")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best", fontsize=8)
+        out = plots_dir / f"avg_dynamic_k_vs_rerank_candidates.png"
+        fig.tight_layout()
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        generated.append(str(out))
+
     def _parse_dynamic_map(raw: object) -> dict:
         if isinstance(raw, dict):
             return raw
@@ -1027,7 +1108,7 @@ def build_line_plots(
         line = ax.plot(ratio_x, hit_rates, marker="o", linewidth=2, label="Dynamic-K Accuracy")[0]
         for x_val, y_val, k_val in zip(ratio_x, hit_rates, avg_ks):
             ax.annotate(
-                f"K={k_val:.2f}",
+                f"r={x_val:.2f}\nK={k_val:.2f}",
                 (x_val, y_val),
                 textcoords="offset points",
                 xytext=(0, 8),
@@ -1049,10 +1130,28 @@ def build_line_plots(
         generated.append(str(out))
 
         fig, ax = plt.subplots(figsize=(10, 5.5))
-        line = ax.plot(ratio_x, hit_rates, marker="o", linewidth=2, label="Dynamic-K Accuracy")[0]
+        dynamic_color = "#1f77b4"
+        baseline_colors = [
+            "#ff7f0e",
+            "#2ca02c",
+            "#d62728",
+            "#9467bd",
+            "#8c564b",
+            "#e377c2",
+            "#7f7f7f",
+            "#17becf",
+        ]
+        line = ax.plot(
+            ratio_x,
+            hit_rates,
+            marker="o",
+            linewidth=2,
+            color=dynamic_color,
+            label="Dynamic-K Accuracy",
+        )[0]
         for x_val, y_val, k_val in zip(ratio_x, hit_rates, avg_ks):
             ax.annotate(
-                f"K={k_val:.2f}",
+                f"r={x_val:.2f}\nK={k_val:.2f}",
                 (x_val, y_val),
                 textcoords="offset points",
                 xytext=(0, 8),
@@ -1066,7 +1165,14 @@ def build_line_plots(
             if not any(key in row for row in question_rows):
                 continue
             acc = sum(int(row.get(key, 0)) for row in question_rows) / max(row_count, 1)
-            ax.axhline(acc, linestyle="--", linewidth=1, alpha=0.6, label=f"Top-{k}={acc:.2f}")
+            ax.axhline(
+                acc,
+                linestyle="--",
+                linewidth=1.2,
+                alpha=0.8,
+                color=baseline_colors[(k - 1) % len(baseline_colors)],
+                label=f"Top-{k}={acc:.2f}",
+            )
 
         ax.set_title("Dynamic Ratio vs Accuracy with Fixed Top-K Baselines")
         ax.set_xlabel("Dynamic ratio r")
@@ -1172,13 +1278,15 @@ def main() -> None:
             "--variant-mode", item["variant_mode"],
             "--secondary-variant-weight", str(item["secondary_variant_weight"]),
             "--rerank-alpha", str(item["rerank_alpha"]),
+            "--rerank-candidates", str(item.get("rerank_candidates", 30)),
         ]
 
         print(
             f"[RUN {idx}/{len(plan)}] {run_id_str} "
             f"(vec={item['weight_vec']}, bm25={item['weight_bm25']}, "
             f"mode={item['variant_mode']}, tr={item['translation_ratio']}, "
-            f"alpha={item['rerank_alpha']}, svw={item['secondary_variant_weight']})",
+            f"alpha={item['rerank_alpha']}, svw={item['secondary_variant_weight']}, "
+            f"rc={item.get('rerank_candidates', 30)})",
             flush=True,
         )
         start = time.perf_counter()
