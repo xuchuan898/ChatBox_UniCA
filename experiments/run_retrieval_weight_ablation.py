@@ -1252,28 +1252,39 @@ def build_line_plots(
                 col_idx = idx % cols
                 ax = axes[row_idx][col_idx] if rows_count > 1 else axes[col_idx]
                 
-                # Gather data for this ratio
+                # Gather data for this ratio from per-question dynamic_by_ratio,
+                # instead of reusing the first-ratio summary fields.
+                ratio_key = f"{ratio:.4f}"
                 ys_dyn = []
                 ys_hit_dyn = []
                 for rc in xs:
-                    rows_data = [r for r in run_summaries if int(r.get("rerank_candidates", 0)) == rc]
+                    rows_data = [r for r in question_rows if int(r.get("rerank_candidates", 0)) == rc]
                     if not rows_data:
                         ys_dyn.append(0.0)
                         ys_hit_dyn.append(0.0)
                     else:
-                        ys_dyn.append(sum(float(r.get("avg_dynamic_k", 0.0)) for r in rows_data) / len(rows_data))
-                        hit_dyn_rate = sum(int(r.get("hit_at_dynamic_k_count", 0)) for r in rows_data) / max(sum(int(r.get("questions", 0)) for r in rows_data), 1)
+                        dyn_ks = []
+                        dyn_hits = []
+                        for row in rows_data:
+                            dyn_map = _parse_dynamic_map(row.get("dynamic_by_ratio", {}))
+                            dyn = dyn_map.get(ratio_key, {}) if isinstance(dyn_map, dict) else {}
+                            if not isinstance(dyn, dict):
+                                dyn = {}
+                            dyn_ks.append(float(dyn.get("k", 0.0)))
+                            dyn_hits.append(int(dyn.get("hit", 0)))
+                        ys_dyn.append(sum(dyn_ks) / max(len(dyn_ks), 1))
+                        hit_dyn_rate = sum(dyn_hits) / max(len(dyn_hits), 1)
                         ys_hit_dyn.append(hit_dyn_rate)
                 
                 ax2 = ax.twinx()
                 color_left = colors_left[idx % len(colors_left)]
                 color_right = colors_right[idx % len(colors_right)]
                 
-                line1 = ax.plot(xs, ys_dyn, marker="o", label="Avg Dynamic-K", linewidth=2, color=color_left)[0]
+                line1 = ax.plot(xs, ys_dyn, marker="o", label=f"Avg Dynamic-K (r={ratio:.2f})", linewidth=2, color=color_left)[0]
                 for x_val, y_val in zip(xs, ys_dyn):
                     ax.annotate(f"{y_val:.2f}", (x_val, y_val), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7, color=color_left)
                 
-                line2 = ax2.plot(xs, ys_hit_dyn, marker="s", label=f"Hit@DynamicK", linewidth=2, color=color_right)[0]
+                line2 = ax2.plot(xs, ys_hit_dyn, marker="s", label=f"Hit@DynamicK (r={ratio:.2f})", linewidth=2, color=color_right)[0]
                 for x_val, y_val in zip(xs, ys_hit_dyn):
                     ax2.annotate(f"{y_val:.2f}", (x_val, y_val), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=7, color=color_right)
                 

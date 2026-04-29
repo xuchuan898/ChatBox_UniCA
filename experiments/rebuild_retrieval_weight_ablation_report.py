@@ -418,6 +418,133 @@ def rebuild_run_rows(
     return per_run_rows, summary, variant_events
 
 
+def rebuild_dynamic_k_multi_ratio_plot(
+    run_dir: Path,
+    run_summaries: list[dict[str, Any]],
+    question_rows: list[dict[str, Any]],
+    dynamic_topk_ratios: list[float],
+) -> list[str]:
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return []
+
+    if not question_rows or not dynamic_topk_ratios or len(dynamic_topk_ratios) <= 1:
+        return []
+
+    plots_dir = run_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    def _parse_dynamic_map(raw: object) -> dict[str, Any]:
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
+        return {}
+
+    run_id_to_rc = {}
+    for summary in run_summaries:
+        run_id = str(summary.get("run_id", ""))
+        try:
+            rc = int(summary.get("rerank_candidates", 0))
+        except Exception:
+            rc = 0
+        if run_id:
+            run_id_to_rc[run_id] = rc
+
+    xs = sorted({int(summary.get("rerank_candidates", 0)) for summary in run_summaries if summary.get("rerank_candidates")})
+    if not xs:
+        return []
+
+    num_ratios = len(dynamic_topk_ratios)
+    cols = min(3, num_ratios)
+    rows_count = (num_ratios + cols - 1) // cols
+    fig, axes = plt.subplots(rows_count, cols, figsize=(5 * cols, 5 * rows_count))
+    if rows_count == 1 and cols == 1:
+        axes = [[axes]]
+    elif rows_count == 1:
+        axes = [axes]
+    elif cols == 1:
+        axes = [[ax] for ax in axes]
+
+    colors_left = ["#1f77b4", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+    colors_right = ["#ff7f0e", "#17becf", "#bcbd22", "#e377c2", "#7f7f7f"]
+
+    for idx, ratio in enumerate(dynamic_topk_ratios):
+        row_idx = idx // cols
+        col_idx = idx % cols
+        ax = axes[row_idx][col_idx] if rows_count > 1 else axes[col_idx]
+        ratio_key = f"{ratio:.4f}"
+
+        ys_dyn: list[float] = []
+        ys_hit_dyn: list[float] = []
+        for rc in xs:
+            rows_data = [
+                r for r in question_rows
+                if run_id_to_rc.get(str(r.get("run_id", "")), 0) == rc
+            ]
+            if not rows_data:
+                ys_dyn.append(0.0)
+                ys_hit_dyn.append(0.0)
+                continue
+
+            dyn_ks: list[float] = []
+            dyn_hits: list[int] = []
+            for row in rows_data:
+                dyn_map = _parse_dynamic_map(row.get("dynamic_by_ratio", {}))
+                dyn = dyn_map.get(ratio_key, {}) if isinstance(dyn_map, dict) else {}
+                if not isinstance(dyn, dict):
+                    dyn = {}
+                dyn_ks.append(float(dyn.get("k", 0.0)))
+                dyn_hits.append(int(dyn.get("hit", 0)))
+
+            ys_dyn.append(sum(dyn_ks) / max(len(dyn_ks), 1))
+            ys_hit_dyn.append(sum(dyn_hits) / max(len(dyn_hits), 1))
+
+        ax2 = ax.twinx()
+        color_left = colors_left[idx % len(colors_left)]
+        color_right = colors_right[idx % len(colors_right)]
+
+        line1 = ax.plot(xs, ys_dyn, marker="o", label=f"Avg Dynamic-K (r={ratio:.2f})", linewidth=2, color=color_left)[0]
+        for x_val, y_val in zip(xs, ys_dyn):
+            ax.annotate(f"{y_val:.2f}", (x_val, y_val), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7, color=color_left)
+
+        line2 = ax2.plot(xs, ys_hit_dyn, marker="s", label=f"Hit@DynamicK (r={ratio:.2f})", linewidth=2, color=color_right)[0]
+        for x_val, y_val in zip(xs, ys_hit_dyn):
+            ax2.annotate(f"{y_val:.2f}", (x_val, y_val), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=7, color=color_right)
+
+        ax.set_title(f"Ratio = {ratio:.2f}")
+        ax.set_xlabel("Rerank candidates")
+        ax.set_ylabel("Avg Dynamic-K", color=color_left, fontsize=9)
+        ax2.set_ylabel("Hit@DynamicK", color=color_right, fontsize=9)
+        ax.tick_params(axis="y", labelcolor=color_left)
+        ax2.tick_params(axis="y", labelcolor=color_right)
+        ax.grid(True, alpha=0.3)
+        max_dyn = max(ys_dyn) if ys_dyn else 0.0
+        ax.set_ylim(0.0, max(max_dyn * 1.2, max_dyn + 0.1, 0.1))
+        ax2.set_ylim(0.0, 1.05)
+
+        lines = [line1, line2]
+        labels = [line.get_label() for line in lines]
+        ax.legend(lines, labels, loc="upper left", fontsize=8)
+
+    for idx in range(num_ratios, rows_count * cols):
+        row_idx = idx // cols
+        col_idx = idx % cols
+        axes[row_idx][col_idx].set_visible(False)
+
+    fig.suptitle("Dynamic-K Metrics vs Rerank Candidates (Multiple Ratios)", fontsize=14, fontweight="bold", y=0.995)
+    out = plots_dir / "dynamic_k_metrics_vs_rerank_candidates_composite.png"
+    fig.tight_layout()
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    return [str(out)]
+
+
 def main() -> None:
     args = parse_args()
     reference = load_reference_module()
@@ -651,6 +778,15 @@ def main() -> None:
             dynamic_topk_ratio=dynamic_topk_ratios[0],
             dynamic_topk_ratios=dynamic_topk_ratios,
         )
+        plot_files.extend(
+            rebuild_dynamic_k_multi_ratio_plot(
+                run_dir=output_dir,
+                run_summaries=interaction_summary_rows,
+                question_rows=question_level_rows,
+                dynamic_topk_ratios=dynamic_topk_ratios,
+            )
+        )
+        plot_files = sorted(set(plot_files))
 
     print("[INFO] Rebuild finished.", flush=True)
     print(f"[INFO] Summary: {output_dir / 'summary.md'}", flush=True)
