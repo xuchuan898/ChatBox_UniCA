@@ -962,13 +962,17 @@ def build_line_plots(
     }
 
     generated = []
+    
+    # Get all unique rerank_candidates values for grouping
+    rc_values = sorted({int(r.get("rerank_candidates", 0)) for r in run_summaries if r.get("rerank_candidates")})
+    
     for sweep_group, (xlabel, slug) in sweep_titles.items():
         rows = [r for r in run_summaries if r.get("sweep_group") == sweep_group]
         if not rows:
             continue
         rows = sorted(rows, key=lambda r: float(r.get("sweep_value", 0.0)))
 
-        # One chart per sweep with four metric lines.
+        # One chart per sweep with four metric lines (aggregated across all rerank_candidates).
         fig, ax = plt.subplots(figsize=(9, 5))
         xs = [float(r.get("sweep_value", 0.0)) for r in rows]
         for metric_idx, (metric_key, label) in enumerate(metric_lines):
@@ -987,7 +991,7 @@ def build_line_plots(
                     fontsize=7,
                     color=line.get_color(),
                 )
-        ax.set_title(f"Retrieval Metrics vs {xlabel}")
+        ax.set_title(f"Retrieval Metrics vs {xlabel} (All Rerank Candidates)")
         ax.set_xlabel(xlabel)
         ax.set_ylabel("Rate")
         ax.set_ylim(0.0, 1.05)
@@ -998,6 +1002,58 @@ def build_line_plots(
         fig.savefig(out, dpi=150)
         plt.close(fig)
         generated.append(str(out))
+        
+        # Composite big-figure: merge RC-specific metric plots into one canvas.
+        if rc_values and len(rc_values) > 1:
+            num_rc = len(rc_values)
+            cols = min(3, num_rc)
+            rows_count = (num_rc + cols - 1) // cols
+            fig, axes = plt.subplots(rows_count, cols, figsize=(6 * cols, 5 * rows_count))
+            axes_list = list(axes.flatten()) if hasattr(axes, "flatten") else [axes]
+
+            for idx, rc in enumerate(rc_values):
+                ax = axes_list[idx]
+                rc_rows = sorted(
+                    [r for r in rows if int(r.get("rerank_candidates", 0)) == rc],
+                    key=lambda r: float(r.get("sweep_value", 0.0)),
+                )
+                if not rc_rows:
+                    ax.set_visible(False)
+                    continue
+
+                xs_rc = [float(r.get("sweep_value", 0.0)) for r in rc_rows]
+                for metric_idx, (metric_key, label) in enumerate(metric_lines):
+                    ys_rc = [
+                        (float(r.get(metric_key, 0.0)) / max(int(r.get("questions", 0)), 1))
+                        for r in rc_rows
+                    ]
+                    line = ax.plot(xs_rc, ys_rc, marker="o", label=label, linewidth=1.5)[0]
+                    for x_val, y_val in zip(xs_rc, ys_rc):
+                        ax.annotate(
+                            f"{y_val:.2f}",
+                            (x_val, y_val),
+                            textcoords="offset points",
+                            xytext=(0, 6 + metric_idx * 1.5),
+                            ha="center",
+                            fontsize=6,
+                            color=line.get_color(),
+                        )
+                ax.set_title(f"RC = {rc}")
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel("Rate")
+                ax.set_ylim(0.0, 1.05)
+                ax.grid(True, alpha=0.3)
+                ax.legend(loc="best", fontsize=7)
+
+            for idx in range(num_rc, len(axes_list)):
+                axes_list[idx].set_visible(False)
+
+            fig.suptitle(f"Retrieval Metrics vs {xlabel} (All Rerank Candidates)", fontsize=14, fontweight="bold")
+            out = plots_dir / f"metrics_vs_{slug}_all_ratios.png"
+            fig.tight_layout()
+            fig.savefig(out, dpi=150)
+            plt.close(fig)
+            generated.append(str(out))
 
         fig, ax = plt.subplots(figsize=(9, 5))
         ys_dyn = [float(r.get("avg_dynamic_k", 0.0)) for r in rows]
@@ -1012,7 +1068,7 @@ def build_line_plots(
                 fontsize=8,
                 color=line.get_color(),
             )
-        ax.set_title(f"Average Dynamic-K vs {xlabel} (r={dynamic_topk_ratio:.2f})")
+        ax.set_title(f"Average Dynamic-K vs {xlabel} (All Rerank Candidates) (r={dynamic_topk_ratio:.2f})")
         ax.set_xlabel(xlabel)
         ax.set_ylabel("Average Dynamic-K")
         ax.grid(True, alpha=0.3)
@@ -1022,11 +1078,271 @@ def build_line_plots(
         fig.savefig(out, dpi=150)
         plt.close(fig)
         generated.append(str(out))
+        
+        # Composite big-figure: merge RC-specific Avg Dynamic-K plots into one canvas.
+        if rc_values and len(rc_values) > 1:
+            num_rc = len(rc_values)
+            cols = min(3, num_rc)
+            rows_count = (num_rc + cols - 1) // cols
+            fig, axes = plt.subplots(rows_count, cols, figsize=(6 * cols, 5 * rows_count))
+            axes_list = list(axes.flatten()) if hasattr(axes, "flatten") else [axes]
+            colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+
+            for idx, rc in enumerate(rc_values):
+                ax = axes_list[idx]
+                rc_rows = sorted(
+                    [r for r in rows if int(r.get("rerank_candidates", 0)) == rc],
+                    key=lambda r: float(r.get("sweep_value", 0.0)),
+                )
+                if not rc_rows:
+                    ax.set_visible(False)
+                    continue
+
+                xs_rc = [float(r.get("sweep_value", 0.0)) for r in rc_rows]
+                ys_dyn_rc = [float(r.get("avg_dynamic_k", 0.0)) for r in rc_rows]
+                line = ax.plot(
+                    xs_rc,
+                    ys_dyn_rc,
+                    marker="o",
+                    label=f"RC={rc}",
+                    linewidth=2,
+                    color=colors[idx % len(colors)],
+                )[0]
+                for x_val, y_val in zip(xs_rc, ys_dyn_rc):
+                    ax.annotate(
+                        f"{y_val:.2f}",
+                        (x_val, y_val),
+                        textcoords="offset points",
+                        xytext=(0, 6),
+                        ha="center",
+                        fontsize=7,
+                        color=line.get_color(),
+                    )
+                ax.set_title(f"RC = {rc}")
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel("Average Dynamic-K")
+                ax.grid(True, alpha=0.3)
+                ax.legend(loc="best", fontsize=8)
+
+            for idx in range(num_rc, len(axes_list)):
+                axes_list[idx].set_visible(False)
+
+            fig.suptitle(f"Average Dynamic-K vs {xlabel} (All Rerank Candidates)", fontsize=14, fontweight="bold")
+            out = plots_dir / f"avg_dynamic_k_vs_{slug}_all_ratios.png"
+            fig.tight_layout()
+            fig.savefig(out, dpi=150)
+            plt.close(fig)
+            generated.append(str(out))
+        
+        # Generate separate plots for each rerank_candidates value
+        if rc_values:
+            for rc in rc_values:
+                rc_rows = sorted(
+                    [r for r in rows if int(r.get("rerank_candidates", 0)) == rc],
+                    key=lambda r: float(r.get("sweep_value", 0.0))
+                )
+                if not rc_rows:
+                    continue
+                
+                fig, ax = plt.subplots(figsize=(9, 5))
+                xs_rc = [float(r.get("sweep_value", 0.0)) for r in rc_rows]
+                for metric_idx, (metric_key, label) in enumerate(metric_lines):
+                    ys_rc = [
+                        (float(r.get(metric_key, 0.0)) / max(int(r.get("questions", 0)), 1))
+                        for r in rc_rows
+                    ]
+                    line = ax.plot(xs_rc, ys_rc, marker="o", label=label)[0]
+                    for x_val, y_val in zip(xs_rc, ys_rc):
+                        ax.annotate(
+                            f"{y_val:.2f}",
+                            (x_val, y_val),
+                            textcoords="offset points",
+                            xytext=(0, 6 + metric_idx * 2),
+                            ha="center",
+                            fontsize=7,
+                            color=line.get_color(),
+                        )
+                ax.set_title(f"Retrieval Metrics vs {xlabel} (RC={rc})")
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel("Rate")
+                ax.set_ylim(0.0, 1.05)
+                ax.grid(True, alpha=0.3)
+                ax.legend(loc="best", fontsize=8)
+                out = plots_dir / f"metrics_vs_{slug}_rc{rc}.png"
+                fig.tight_layout()
+                fig.savefig(out, dpi=150)
+                plt.close(fig)
+                generated.append(str(out))
+                
+                fig, ax = plt.subplots(figsize=(9, 5))
+                ys_dyn_rc = [float(r.get("avg_dynamic_k", 0.0)) for r in rc_rows]
+                line = ax.plot(xs_rc, ys_dyn_rc, marker="o", label="Avg Dynamic-K")[0]
+                for x_val, y_val in zip(xs_rc, ys_dyn_rc):
+                    ax.annotate(
+                        f"{y_val:.2f}",
+                        (x_val, y_val),
+                        textcoords="offset points",
+                        xytext=(0, 6),
+                        ha="center",
+                        fontsize=8,
+                        color=line.get_color(),
+                    )
+                ax.set_title(f"Average Dynamic-K vs {xlabel} (RC={rc}) (r={dynamic_topk_ratio:.2f})")
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel("Average Dynamic-K")
+                ax.grid(True, alpha=0.3)
+                ax.legend(loc="best", fontsize=8)
+                out = plots_dir / f"avg_dynamic_k_vs_{slug}_rc{rc}.png"
+                fig.tight_layout()
+                fig.savefig(out, dpi=150)
+                plt.close(fig)
+                generated.append(str(out))
 
     # New: analyze effect of number of rerank candidates if present
     rc_values = sorted({int(r.get("rerank_candidates", 0)) for r in run_summaries if r.get("rerank_candidates")})
-    if rc_values:
+    if rc_values and len(rc_values) > 1:
         xs = rc_values
+        
+        # Composite plot 1: All Hit@X metrics vs rerank_candidates
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for metric_idx, (metric_key, label) in enumerate(metric_lines):
+            ys = []
+            for rc in xs:
+                rows = [r for r in run_summaries if int(r.get("rerank_candidates", 0)) == rc]
+                if not rows:
+                    ys.append(0.0)
+                    continue
+                val = sum(int(r.get(metric_key, 0)) for r in rows) / max(sum(int(r.get("questions", 0)) for r in rows), 1)
+                ys.append(val)
+            line = ax.plot(xs, ys, marker="o", label=label, linewidth=2)[0]
+            for x_val, y_val in zip(xs, ys):
+                ax.annotate(f"{y_val:.2f}", (x_val, y_val), textcoords="offset points", xytext=(0, 6 + metric_idx * 2), ha="center", fontsize=8, color=line.get_color())
+        ax.set_title("All Hit@X Metrics vs Rerank Candidates (Composite)")
+        ax.set_xlabel("Rerank candidates")
+        ax.set_ylabel("Rate")
+        ax.set_ylim(0.0, 1.05)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best", fontsize=8)
+        out = plots_dir / f"metrics_vs_rerank_candidates_composite.png"
+        fig.tight_layout()
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        generated.append(str(out))
+        
+        # Composite plot 2: Avg Dynamic-K and Hit@Dynamic-K vs rerank_candidates (Multiple Ratios)
+        # Create subplots for each dynamic_topk_ratio
+        if dynamic_topk_ratios and len(dynamic_topk_ratios) > 1:
+            num_ratios = len(dynamic_topk_ratios)
+            cols = min(3, num_ratios)
+            rows_count = (num_ratios + cols - 1) // cols
+            fig, axes = plt.subplots(rows_count, cols, figsize=(5 * cols, 5 * rows_count))
+            if rows_count == 1 and cols == 1:
+                axes = [[axes]]
+            elif rows_count == 1:
+                axes = [axes]
+            elif cols == 1:
+                axes = [[ax] for ax in axes]
+            
+            # Define distinct colors for consistency
+            colors_left = ["#1f77b4", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+            colors_right = ["#ff7f0e", "#17becf", "#bcbd22", "#e377c2", "#7f7f7f"]
+            
+            for idx, ratio in enumerate(dynamic_topk_ratios):
+                row_idx = idx // cols
+                col_idx = idx % cols
+                ax = axes[row_idx][col_idx] if rows_count > 1 else axes[col_idx]
+                
+                # Gather data for this ratio
+                ys_dyn = []
+                ys_hit_dyn = []
+                for rc in xs:
+                    rows_data = [r for r in run_summaries if int(r.get("rerank_candidates", 0)) == rc]
+                    if not rows_data:
+                        ys_dyn.append(0.0)
+                        ys_hit_dyn.append(0.0)
+                    else:
+                        ys_dyn.append(sum(float(r.get("avg_dynamic_k", 0.0)) for r in rows_data) / len(rows_data))
+                        hit_dyn_rate = sum(int(r.get("hit_at_dynamic_k_count", 0)) for r in rows_data) / max(sum(int(r.get("questions", 0)) for r in rows_data), 1)
+                        ys_hit_dyn.append(hit_dyn_rate)
+                
+                ax2 = ax.twinx()
+                color_left = colors_left[idx % len(colors_left)]
+                color_right = colors_right[idx % len(colors_right)]
+                
+                line1 = ax.plot(xs, ys_dyn, marker="o", label="Avg Dynamic-K", linewidth=2, color=color_left)[0]
+                for x_val, y_val in zip(xs, ys_dyn):
+                    ax.annotate(f"{y_val:.2f}", (x_val, y_val), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7, color=color_left)
+                
+                line2 = ax2.plot(xs, ys_hit_dyn, marker="s", label=f"Hit@DynamicK", linewidth=2, color=color_right)[0]
+                for x_val, y_val in zip(xs, ys_hit_dyn):
+                    ax2.annotate(f"{y_val:.2f}", (x_val, y_val), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=7, color=color_right)
+                
+                ax.set_title(f"Ratio = {ratio:.2f}")
+                ax.set_xlabel("Rerank candidates")
+                ax.set_ylabel("Avg Dynamic-K", color=color_left, fontsize=9)
+                ax2.set_ylabel("Hit@DynamicK", color=color_right, fontsize=9)
+                ax.tick_params(axis="y", labelcolor=color_left)
+                ax2.tick_params(axis="y", labelcolor=color_right)
+                ax.grid(True, alpha=0.3)
+                ax.set_ylim(0.0, max(ys_dyn) * 1.2 if ys_dyn else 10)
+                ax2.set_ylim(0.0, 1.05)
+                
+                lines = [line1, line2]
+                labels = [line.get_label() for line in lines]
+                ax.legend(lines, labels, loc="upper left", fontsize=8)
+            
+            # Hide unused subplots
+            for idx in range(num_ratios, rows_count * cols):
+                row_idx = idx // cols
+                col_idx = idx % cols
+                axes[row_idx][col_idx].set_visible(False)
+            
+            fig.suptitle("Dynamic-K Metrics vs Rerank Candidates (Multiple Ratios)", fontsize=14, fontweight='bold', y=0.995)
+        else:
+            # Fallback to single plot if only one ratio
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ys_dyn = []
+            ys_hit_dyn = []
+            for rc in xs:
+                rows = [r for r in run_summaries if int(r.get("rerank_candidates", 0)) == rc]
+                if not rows:
+                    ys_dyn.append(0.0)
+                    ys_hit_dyn.append(0.0)
+                else:
+                    ys_dyn.append(sum(float(r.get("avg_dynamic_k", 0.0)) for r in rows) / len(rows))
+                    hit_dyn_rate = sum(int(r.get("hit_at_dynamic_k_count", 0)) for r in rows) / max(sum(int(r.get("questions", 0)) for r in rows), 1)
+                    ys_hit_dyn.append(hit_dyn_rate)
+            
+            ax2 = ax.twinx()
+            line1 = ax.plot(xs, ys_dyn, marker="o", label="Avg Dynamic-K", linewidth=2, color="#1f77b4")[0]
+            for x_val, y_val in zip(xs, ys_dyn):
+                ax.annotate(f"{y_val:.2f}", (x_val, y_val), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8, color=line1.get_color())
+            
+            line2 = ax2.plot(xs, ys_hit_dyn, marker="s", label=f"Hit@DynamicK(r={dynamic_topk_ratio:.2f})", linewidth=2, color="#ff7f0e")[0]
+            for x_val, y_val in zip(xs, ys_hit_dyn):
+                ax2.annotate(f"{y_val:.2f}", (x_val, y_val), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=8, color=line2.get_color())
+            
+            ax.set_title("Dynamic-K Metrics vs Rerank Candidates (Composite)")
+            ax.set_xlabel("Rerank candidates")
+            ax.set_ylabel("Avg Dynamic-K", color="#1f77b4")
+            ax2.set_ylabel(f"Hit@DynamicK(r={dynamic_topk_ratio:.2f})", color="#ff7f0e")
+            ax.tick_params(axis="y", labelcolor="#1f77b4")
+            ax2.tick_params(axis="y", labelcolor="#ff7f0e")
+            ax.grid(True, alpha=0.3)
+            ax.set_ylim(0.0, max(ys_dyn) * 1.2 if ys_dyn else 10)
+            ax2.set_ylim(0.0, 1.05)
+            
+            lines = [line1, line2]
+            labels = [line.get_label() for line in lines]
+            ax.legend(lines, labels, loc="upper left", fontsize=8)
+        
+        out = plots_dir / f"dynamic_k_metrics_vs_rerank_candidates_composite.png"
+        fig.tight_layout()
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        generated.append(str(out))
+        
+        # Individual metric plots for each rerank_candidates value
         for metric_idx, (metric_key, label) in enumerate(metric_lines):
             ys = []
             for rc in xs:
@@ -1449,6 +1765,7 @@ def main() -> None:
                 "rerank_alpha": item["rerank_alpha"],
                 "weight_vec": item["weight_vec"],
                 "weight_bm25": item["weight_bm25"],
+                "rerank_candidates": item.get("rerank_candidates"),
                 "exit_code": proc.returncode,
                 "duration_sec": round(duration_sec, 3),
                 "retrieval_blocks": len(blocks),
@@ -1556,6 +1873,7 @@ def main() -> None:
             "rerank_alpha",
             "weight_vec",
             "weight_bm25",
+            "rerank_candidates",
             "exit_code",
             "duration_sec",
             "questions_expected",

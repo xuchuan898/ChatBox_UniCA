@@ -11,7 +11,7 @@ from typing import Any
 
 
 REFERENCE_SCRIPT_NAME = "run_retrieval_weight_ablation.py"
-DEFAULT_INPUT_DIR = Path("experiments/results/retrieval_weight_ablation_20260428_201742")
+DEFAULT_INPUT_DIR = Path("experiments/results/retrieval_weight_ablation_20260428_222229")
 DEFAULT_QUESTION_FILE = Path("questions/questions_batch_student_short_typo_en_fr.txt")
 DEFAULT_GOLD_FILE = Path("questions/questions_batch_student_short_typo_en_fr_gold.json")
 DEFAULT_DYNAMIC_TOPK_RATIO = "0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9"
@@ -385,10 +385,13 @@ def rebuild_run_rows(
             "hit_at_dynamic_k": first_dynamic.get("hit", 0),
             "dynamic_by_ratio": json.dumps(dynamic_by_ratio, ensure_ascii=False),
         }
+        # Initialize all fixed hit_at_k fields from 1 to 8
         for k in range(1, 9):
             row[f"hit_at_{k}"] = fixed_hit_map.get(k, 0)
+        # Override with eval_topks values if they exist
         for k in eval_topks:
-            row[f"hit_at_{k}"] = hit_map.get(k, row.get(f"hit_at_{k}", 0))
+            if k <= 8:
+                row[f"hit_at_{k}"] = hit_map.get(k, row.get(f"hit_at_{k}", 0))
 
         per_run_rows.append(row)
 
@@ -405,6 +408,7 @@ def rebuild_run_rows(
             "rerank_alpha": run_item["rerank_alpha"],
             "weight_vec": run_item["weight_vec"],
             "weight_bm25": run_item["weight_bm25"],
+            "rerank_candidates": run_item.get("rerank_candidates"),
             "exit_code": run_item.get("exit_code"),
             "duration_sec": run_item.get("duration_sec"),
             "retrieval_blocks": len(blocks),
@@ -419,7 +423,8 @@ def main() -> None:
     reference = load_reference_module()
 
     project_root = Path(__file__).resolve().parents[1]
-    input_dir = args.input_dir.resolve()
+    # Resolve input_dir relative to project_root if it's a relative path
+    input_dir = args.input_dir if args.input_dir.is_absolute() else (project_root / args.input_dir)
     output_dir = (args.output_dir.resolve() if args.output_dir else input_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -596,6 +601,7 @@ def main() -> None:
             "rerank_alpha",
             "weight_vec",
             "weight_bm25",
+            "rerank_candidates",
             "exit_code",
             "duration_sec",
             "questions_expected",
