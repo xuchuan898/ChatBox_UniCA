@@ -6,3 +6,7 @@
 
 !docs/chroma/master.md
 !README.md
+!experiments/
+!experiments/results/
+!experiments/results/retrieval_weight_ablation_20260428_222229/
+!experiments/results/retrieval_weight_ablation_20260428_222229/**

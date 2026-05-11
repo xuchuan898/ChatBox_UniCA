@@ -1,0 +1,150 @@
+[Q1] who is m2 head? can share email pls?
+[A1] Christopher Leturc
+[DEBUG] QA invoke time: 0.37s
+
+[Q2] assistant mail? can you give it?
+[A2] I don’t know.
+[DEBUG] QA invoke time: 0.43s
+
+[Q3] alternnce contact email for m1?
+[A3] I don't know.
+[DEBUG] QA invoke time: 0.37s
+
+[Q4] internship how many month exactly?
+[A4] I don't know.
+[DEBUG] QA invoke time: 0.37s
+
+[Q5] neural l p course ects how many?
+[A5] I don't know.
+[DEBUG] QA invoke time: 0.35s
+
+[Q6] ai game prog teacher in s1?
+[A6] The course presents different techniques to program games for one or two players.
+[DEBUG] QA invoke time: 0.44s
+
+[Q7] regin teaches which 2 courses in total?
+[A7] Regin teaches UE AI Game Programming, UE Model Checking for AI, and UE Neural Language Processing.
+[DEBUG] QA invoke time: 0.46s
+
+[Q8] s2 course with belief revision + fuzzy logic, name?
+[A8] The course will introduce an interesting variety of subjects in programming, algorithms, and discrete mathematics through puzzles and problems which have appeared in the International ACM Programming Contest and similar venues.
+[DEBUG] QA invoke time: 0.49s
+
+[Q9] s2 combinatorial optimization teacher who?
+[A9] Merci pour votre question!
+[DEBUG] QA invoke time: 0.40s
+
+[Q10] which s1 course has kripke + ctl/ltl exactly?
+[A10] S1: Cours Programme 2026/2027 > Semestre 1 > UE Model Checking for AI - 3 ECTS
+[DEBUG] QA invoke time: 0.50s
+
+[Q11] s1 course with acm puzzle style, name?
+[A11] Advanced Algorithms - 3 ECTS
+
+[DEBUG] QA invoke time: 0.40s
+
+[Q12] gpu cluster ml elective name in s1?
+[A12] Distributed Computing and Learning
+[DEBUG] QA invoke time: 0.40s
+
+[Q13] malapert teaches which s2 course exactly?
+[A13] I don't know.
+[DEBUG] QA invoke time: 0.41s
+
+[Q14] buffa course in s2, course name?
+[A14] Advanced Algorithms
+
+[DEBUG] QA invoke time: 0.35s
+
+[Q15] lozes elective s2 name, what is it?
+[A15] Lozes elective s2 name is a course designed for students in the second semester of the Information Systems program.
+[DEBUG] QA invoke time: 0.48s
+
+[Q16] di giusto elective s2, name?
+[A16] Cours Programme 2026/2027 > Semestre 2 > **3D Game Programming in Real Time on the Web**(EN) - 3 ECTS
+
+[DEBUG] QA invoke time: 0.50s
+
+[Q17] formenti elective s2, name?
+[A17] I don't know.
+[DEBUG] QA invoke time: 0.40s
+
+[Q18] leturc + regin co-teach which s1 ue exactly?
+[A18] I don't know.
+[DEBUG] QA invoke time: 0.40s
+
+[Q19] Qui est responsable du M2, et quel est son e-mail ?
+[A19] Christopher Leturc (Christopher.LETURC@univ-cotedazur.fr)
+Merci pour votre question!
+[DEBUG] QA invoke time: 0.46s
+
+[Q20] Qui est l'assistant du master, avec l'e-mail ?
+[A20] Audrey Ereteo
+
+[DEBUG] QA invoke time: 0.40s
+
+[Q21] Quel est l'e-mail du contact alternance pour le M1 ?
+[A21] I don't know.
+[DEBUG] QA invoke time: 0.35s
+
+[Q22] Quelle est la duree du stage obligatoir ?
+[A22] I don't know.
+[DEBUG] QA invoke time: 0.33s
+
+[Q23] Combien d'ECTS vaut Neural Language Processing ?
+[A23] I don't know.
+[DEBUG] QA invoke time: 0.38s
+
+[Q24] Qui enseigne AI Game Programing en S1 ?
+[A24] Cours Programme 2026/2027 > Semestre 1 > **UE AI Game Programming (EN)** - 3 ECTS
+Merci pour votre question!
+[DEBUG] QA invoke time: 0.54s
+
+[Q25] Quelles sont les deux UE enseignees par M. Regin ?
+[A25] M. Regin teaches courses on UE AI Game Programming, Cours Programme 2026/2027, and Model Checking for AI.
+[DEBUG] QA invoke time: 0.52s
+
+[Q26] Quelle UE de S2 parle de revision des croyances et de logique floue ?
+[A26] UE Natural Language Processing
+[DEBUG] QA invoke time: 0.36s
+
+[Q27] En S2, qui enseigne l'UE combinatorial optimization ?
+[A27] UE Combinatorial Optimization (EN) - 3 ECTS
+[DEBUG] QA invoke time: 0.42s
+
+[Q28] Quelle UE de S1 couvre Kripke et CTL/LTL ?
+[A28] I don't know.
+[DEBUG] QA invoke time: 0.37s
+
+[Q29] Quelle UE de S1 indique des enigmes type ACM ?
+[A29] I don't know.
+[DEBUG] QA invoke time: 0.40s
+
+[Q30] Quelle UE au choix de S1 traite de ML sur cluster GPU ?
+[A30] The course UE AI: Models and Applications - 3 ECTS treats machine learning on cluster GPU.
+[DEBUG] QA invoke time: 0.44s
+
+[Q31] Quelle UE de S2 est enseignee par M. Malapert ?
+[A31] I don't know.
+[DEBUG] QA invoke time: 0.38s
+
+[Q32] Quelle UE au choix de S2 est enseignee par M. Buffa ?
+[A32] 3 ECTS
+
+[DEBUG] QA invoke time: 0.35s
+
+[Q33] Quelle UE au choix de S2 est enseignee par M. Lozes ?
+[A33] M. Lozes teaches the lecturer on the course “Scalable Data Science” (EN).
+[DEBUG] QA invoke time: 0.42s
+
+[Q34] Quelle UE au choix de S2 est enseignee par Mme. Di Giusto ?
+[A34] I don't know.
+[DEBUG] QA invoke time: 0.34s
+
+[Q35] Quelle UE au choix de S2 est enseignee par E. Formenti ?
+[A35] Computational Complexity
+[DEBUG] QA invoke time: 0.35s
+
+[Q36] Quelle UE de S1 est co-enseignee par Leturc et Regin ?
+[A36] I don't know.
+[DEBUG] QA invoke time: 0.38s
