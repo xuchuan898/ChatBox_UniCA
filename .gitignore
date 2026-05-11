@@ -3,6 +3,21 @@
 !.gitignore
 
 !chat_box.py
+!build_index.py
+!config.yaml
+!core/
+!core/__init__.py
+!core/config_loader.py
+!core/document_loader.py
+!core/chunker.py
+!core/indexer.py
+!core/retriever.py
+!core/reranker.py
+!core/generator.py
+!core/query_expander.py
+!core/semantic_cache.py
+!core/conversation_memory.py
+!core/evaluator.py
 
 !docs/chroma/master.md
 !README.md

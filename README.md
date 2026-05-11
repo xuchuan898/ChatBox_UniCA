@@ -1,95 +1,92 @@
 # Chatbox Project
 
-This project implements a simple chatbot for answering questions about the Master's program in Computer Science at Université Côte d'Azur, using retrieval-augmented generation (RAG) with LangChain, Chroma vector database, HuggingFace embeddings, and an Ollama-hosted LLM.
+Industrialized local RAG chatbot for Université Côte d'Azur CS Master Q&A.
 
-## Features
+## Key Upgrades
 
-- Loads and processes the document from `master.md`.
-- Splits text using Markdown headers and token-based chunking.
-- Creates an in-memory Chroma vector database for efficient retrieval.
-- Uses Maximal Marginal Relevance (MMR) for diverse document retrieval.
-- Interactive chat interface in the terminal.
-- Answers in the language of the query, concisely, and ends with "Merci pour votre question!"
+- Persistent indexing (`Chroma` + `BM25`) with hash validation and rebuild control.
+- Modular pipeline (`document_loader`, `chunker`, `indexer`, `retriever`, `reranker`, `generator`).
+- Query expansion module (`core/query_expander.py`) with pluggable rewriter:
+  - `OllamaRewriter` (paraphrase + translation)
+  - `PassthroughRewriter` (ablation baseline)
+- Semantic cache (`core/semantic_cache.py`) with cosine threshold + TTL.
+- Conversation memory (`core/conversation_memory.py`) for short/long-term context.
+- Centralized configuration (`config.yaml`) with priority:
+  - CLI > config.yaml > default values.
 
-## Installation
+## Install
 
-1. Clone or download the project.
-2. Install dependencies:
-   ```bash
-   pip install langchain langchain-community langchain-huggingface langchain-text-splitters langchain-ollama langchain-core chromadb sentence-transformers bm25s pymupdf4llm mammoth
-   ```
-3. Ensure Ollama is installed and running with the `gemma3:1b` model:
-   ```bash
-   ollama pull gemma3:1b
-   ```
+```bash
+pip install langchain langchain-community langchain-huggingface langchain-text-splitters langchain-ollama langchain-core chromadb sentence-transformers bm25s mammoth pyyaml
+```
+
+Optional (PDF conversion):
+```bash
+pip install docling
+```
+
+Ensure Ollama model exists:
+```bash
+ollama pull gemma3:1b
+```
+
+## Build / Load Index
+
+Offline build:
+```bash
+python build_index.py --doc-file ./docs/chroma/master.md
+```
+
+Runtime auto-logic in `chat_box.py`:
+- meta exists + hash matches => load
+- else => rebuild
+- force via `--force-rebuild`
 
 ## Usage
 
-Run with a single local document (fastest):
+Single question:
 ```bash
-python chat_box.py --doc-file ./docs/chroma/master.txt
+python chat_box.py --doc-file ./docs/chroma/master.md -q "What are M1 prerequisites?"
 ```
 
-Optional URL sources (one URL per line in `./docs/chroma/source_urls.txt`):
+Batch questions:
 ```bash
-python chat_box.py --doc-file ./docs/chroma/master.txt --url-file ./docs/chroma/source_urls.txt
+python chat_box.py --doc-file ./docs/chroma/master.md --question-file ./questions/questions_batch_example.txt --answer-file ./docs/chroma/answers.txt
 ```
 
-Single question mode:
+Enable query expansion controls:
 ```bash
-python chat_box.py --doc-file ./docs/chroma/master.txt -q "Your question here"
+python chat_box.py --enable-query-expansion true --expansion-model gemma3:1b --expansion-paraphrases 1 --expansion-add-translation true --expansion-source-lang auto
 ```
 
-Batch question mode (`./questions/*.txt`):
+Enable cache controls:
 ```bash
-python chat_box.py --doc-file ./docs/chroma/master.txt --question-file ./questions/questions_batch_example.txt --answer-file ./docs/chroma/answers.txt
+python chat_box.py --enable-cache true --cache-threshold 0.92 --cache-ttl 86400
 ```
 
-Run full question x document matrix experiment (exports prompts + answers for later AI analysis):
+Enable memory controls:
 ```bash
-python experiments/run_doc_matrix_experiment.py --question-catalog ./questions/generated_questions_docs_chroma.json
-```
-
-Debug mode (timing, chunks, retrieval details):
-```bash
-python chat_box.py --doc-file ./docs/chroma/master.txt --debug
+python chat_box.py --enable-memory true --memory-rounds 5
 ```
 
 ## Project Structure
 
-- `chat_box.py`: Main script with data preparation, chatbot setup, and interactive loop.
-- `docs/chroma/master.md`: Original markdown knowledge document.
-- `docs/chroma/master.txt`: Plain-text version used for format comparison experiments.
-- `docs/chroma/source_urls.txt`: Optional URL list for web/calendar ingestion.
-- `questions/questions_batch_example.txt`: Example batch question file.
-- `questions/generated_questions_docs_chroma.json`: 5 curated questions per document in `docs/chroma` (excluding `source_urls.txt`).
-- `experiments/run_doc_matrix_experiment.py`: Runs all questions against all documents and exports prompts/retrieval/answers.
+- `chat_box.py`: CLI orchestrator (memory -> cache -> expansion -> retrieve -> rerank -> generate).
+- `build_index.py`: offline persistent index build.
+- `core/config_loader.py`: config loading + CLI override merge.
+- `core/document_loader.py`: MD/TXT/PDF/DOCX/URL loading.
+- `core/chunker.py`: adaptive chunking.
+- `core/indexer.py`: build/load/ensure persistent Chroma + BM25.
+- `core/retriever.py`: hybrid retrieval + RRF + expansion aggregation.
+- `core/reranker.py`: cross-encoder dual-score rerank.
+- `core/generator.py`: constrained answer generation prompt.
+- `core/query_expander.py`: query rewrite/translation + language detection.
+- `core/semantic_cache.py`: semantic answer cache.
+- `core/conversation_memory.py`: short/long-term memory.
+- `core/evaluator.py`: context recall helper + RAGAS placeholder.
+- `experiments/`: original experiment scripts (kept compatible).
 
-## How It Works
+## Notes on Compatibility
 
-1. **Data Preparation**: Loads `master.md`, splits by Markdown headers, then into chunks of 400 tokens with 120 overlap. Enhances M1-related chunks for better retrieval.
-2. **Embeddings**: Uses `intfloat/multilingual-e5-base` for vectorization.
-3. **Retrieval**: MMR retriever fetches 10 relevant docs from 20 candidates, with optional metadata filtering for M1 queries.
-4. **Generation**: Ollama's Gemma3:1b generates answers based on context and prompt.
-5. **Chat Loop**: Processes user input, retrieves context, generates response.
-
-## Dependencies
-
-- Python 3.x
-- LangChain ecosystem
-- ChromaDB
-- HuggingFace Transformers
-- Ollama
-
-## Matrix Experiment Outputs
-
-`experiments/run_doc_matrix_experiment.py` creates a timestamped folder in `experiments/results/` with:
-
-- `responses.jsonl`: one row per (question, target doc), including rendered prompt, retrieval trace, answer, and timing.
-- `prompts.jsonl`: prompt-focused export for downstream AI analysis.
-- `comparison.csv`: side-by-side answers per question across all target docs.
-- `summary.json` and `summary.md`: aggregate timing and answer-shape metrics.
-
-## Contributing
-
-Feel free to submit issues or pull requests for improvements. Ensure changes align with the project's focus on RAG for educational Q&A.
+- Original `chat_box.py` exported APIs (`prepare_data`, `chatbox`) are preserved for `experiments/run_doc_matrix_experiment.py`.
+- Existing CLI arguments remain valid; new features are opt-in or config-driven.

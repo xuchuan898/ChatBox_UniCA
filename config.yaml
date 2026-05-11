@@ -1,0 +1,32 @@
+indexing:
+  persist_dir: "./index_store"
+  force_rebuild: false
+
+retrieval:
+  weight_vec: 1.25
+  weight_bm25: 0.75
+  rerank_candidates: 30
+  rerank_alpha: 0.5
+
+query_expansion:
+  enabled: true
+  rewriter: "ollama"
+  model_name: "gemma3:1b"
+  num_paraphrases: 1
+  add_translation: true
+  source_lang: "auto"
+  target_lang_for_translation: "auto"
+
+cache:
+  enabled: true
+  threshold: 0.92
+  ttl: 86400
+
+memory:
+  enabled: true
+  short_term_rounds: 5
+
+generation:
+  model_name: "gemma3:1b"
+  temperature: 0.0
+  num_predict: 256

@@ -165,6 +165,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Auto-start ollama serve if host is unreachable.",
     )
+    parser.add_argument("--enable-query-expansion", type=str, default=None)
+    parser.add_argument("--expansion-model", type=str, default=None)
+    parser.add_argument("--expansion-paraphrases", type=int, default=None)
+    parser.add_argument("--expansion-add-translation", type=str, default=None)
+    parser.add_argument("--expansion-source-lang", type=str, default=None)
     return parser.parse_args()
 
 
@@ -1607,6 +1612,16 @@ def main() -> None:
             "--rerank-alpha", str(item["rerank_alpha"]),
             "--rerank-candidates", str(item.get("rerank_candidates", 30)),
         ]
+        optional_overrides = [
+            ("--enable-query-expansion", args.enable_query_expansion),
+            ("--expansion-model", args.expansion_model),
+            ("--expansion-paraphrases", args.expansion_paraphrases),
+            ("--expansion-add-translation", args.expansion_add_translation),
+            ("--expansion-source-lang", args.expansion_source_lang),
+        ]
+        for flag, value in optional_overrides:
+            if value is not None:
+                cmd.extend([flag, str(value)])
 
         print(
             f"[RUN {idx}/{len(plan)}] {run_id_str} "
