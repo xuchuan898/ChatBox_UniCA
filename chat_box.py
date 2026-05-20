@@ -40,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--variant-mode", type=str, choices=["primary_only", "mapped_current", "mapped_expanded"], default="mapped_current")
     parser.add_argument("--rerank-alpha", type=float, default=0.5)
     parser.add_argument("--rerank-candidates", type=int, default=30)
+    parser.add_argument("--enable-multi-variant-rerank", type=str, default=None)
     parser.add_argument("--force-rebuild", action="store_true")
     parser.add_argument("--config", type=str, default="config.yaml")
     parser.add_argument("--enable-query-expansion", type=str, default=None)
@@ -147,7 +148,7 @@ def chatbox(
     """Compatibility function used by experiments."""
     _ = secondary_variant_weight, variant_mode
     query_expander = QueryExpander(PassthroughRewriter(), num_paraphrases=0, add_translation=False)
-    reranker = CrossEncoderReranker(alpha=rerank_alpha)
+    reranker = CrossEncoderReranker(alpha=rerank_alpha, multi_variant_enabled=False)
     retriever = HybridRetriever(
         vectordb=vectordb,
         bm25_index=bm25_index,
@@ -183,6 +184,7 @@ def main() -> None:
         "retrieval.weight_bm25": args.weight_bm25,
         "retrieval.rerank_alpha": args.rerank_alpha,
         "retrieval.rerank_candidates": args.rerank_candidates,
+        "retrieval.multi_variant_rerank_enabled": _parse_bool(args.enable_multi_variant_rerank),
         "query_expansion.enabled": _parse_bool(args.enable_query_expansion),
         "query_expansion.model_name": args.expansion_model,
         "query_expansion.num_paraphrases": args.expansion_paraphrases,
@@ -219,7 +221,15 @@ def main() -> None:
             f"add_translation={qe['add_translation']} source_lang={qe['source_lang']} "
             f"target_lang={qe['target_lang_for_translation']}"
         )
-    reranker = CrossEncoderReranker(alpha=float(config["retrieval"]["rerank_alpha"]))
+        print(
+            f"[DEBUG][BOOT] rerank multi_variant_enabled="
+            f"{bool(config['retrieval'].get('multi_variant_rerank_enabled', False))} "
+            f"alpha={config['retrieval']['rerank_alpha']}"
+        )
+    reranker = CrossEncoderReranker(
+        alpha=float(config["retrieval"]["rerank_alpha"]),
+        multi_variant_enabled=bool(config["retrieval"].get("multi_variant_rerank_enabled", False)),
+    )
     retriever = HybridRetriever(
         vectordb=state["vectordb"],
         bm25_index=state["bm25_index"],

@@ -17,6 +17,15 @@ def _short_source(doc: Document) -> str:
     return src.split("/")[-1].split("\\")[-1]
 
 
+def _compact_preview(text: str, max_chars: int = 220) -> str:
+    compact = " ".join(text.split())
+    return compact[:max_chars] + ("..." if len(compact) > max_chars else "")
+
+
+def _md_escape(text: str) -> str:
+    return str(text).replace("|", "\\|").replace("`", "'")
+
+
 class HybridRetriever:
     """Hybrid retrieval pipeline with optional query expansion."""
 
@@ -100,11 +109,17 @@ class HybridRetriever:
         merged = self._weighted_rrf(ranked_lists)[: self.rerank_candidates]
         fusion_sec = time.perf_counter() - t_fusion
         base_docs = [doc for doc, _ in merged]
-        if self.debug and hasattr(self.reranker, "_translated_query"):
-            translated = self.reranker._translated_query(question)
-            print(f"[DEBUG][RERANK_DUAL][QUERY] src={question!r} translated={translated!r} alpha={self.reranker.alpha:.3f}")
+        if self.debug:
+            rerank_mode = "multi_variant" if getattr(self.reranker, "multi_variant_enabled", False) else "single_query"
+            print(f"[DEBUG][RERANK] mode={rerank_mode} variants_for_rerank={len(queries) if rerank_mode == 'multi_variant' else 1}")
         t_rerank = time.perf_counter()
-        reranked = self.reranker.rerank(question, base_docs, top_n=len(base_docs), return_scores=True)
+        reranked = self.reranker.rerank(
+            question,
+            base_docs,
+            top_n=len(base_docs),
+            return_scores=True,
+            query_variants=queries,
+        )
         rerank_sec = time.perf_counter() - t_rerank
         reranked_scored = [(doc, score) for doc, score, _, _ in reranked]
         top_k = self._dynamic_top_k(reranked_scored)
@@ -124,16 +139,24 @@ class HybridRetriever:
             print(f"- Reranked kept: {len(reranked_scored)}")
             print("")
             print("#### Base Retrieval")
-            print("| Rank | Chunk ID | Score | Source |")
-            print("| ---: | ---: | ---: | --- |")
+            print("| Rank | Chunk ID | Score | Source | Type | Chunk Type | Preview |")
+            print("| ---: | ---: | ---: | --- | --- | --- | --- |")
             for i, (doc, score) in enumerate(merged, 1):
-                print(f"| {i} | {doc.metadata.get('chunk_id', 'unknown')} | {score:.4f} | {_short_source(doc)} |")
+                print(
+                    f"| {i} | {_md_escape(doc.metadata.get('chunk_id', 'unknown'))} | {score:.4f} | "
+                    f"{_md_escape(_short_source(doc))} | {_md_escape(doc.metadata.get('source_type', 'unknown'))} | "
+                    f"{_md_escape(doc.metadata.get('chunk_type', 'unknown'))} | {_md_escape(_compact_preview(doc.page_content))} |"
+                )
             print("")
             print("#### Rerank Result")
-            print("| Rank | Chunk ID | Score | Source |")
-            print("| ---: | ---: | ---: | --- |")
+            print("| Rank | Chunk ID | Score | Source | Type | Chunk Type | Preview |")
+            print("| ---: | ---: | ---: | --- | --- | --- | --- |")
             for i, (doc, score) in enumerate(reranked_scored, 1):
-                print(f"| {i} | {doc.metadata.get('chunk_id', 'unknown')} | {score:.4f} | {_short_source(doc)} |")
+                print(
+                    f"| {i} | {_md_escape(doc.metadata.get('chunk_id', 'unknown'))} | {score:.4f} | "
+                    f"{_md_escape(_short_source(doc))} | {_md_escape(doc.metadata.get('source_type', 'unknown'))} | "
+                    f"{_md_escape(doc.metadata.get('chunk_type', 'unknown'))} | {_md_escape(_compact_preview(doc.page_content))} |"
+                )
             print("[DEBUG][RETRIEVE_MD_END]")
             total_sec = time.perf_counter() - t0
             print(

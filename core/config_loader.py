@@ -16,6 +16,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "weight_bm25": 0.75,
         "rerank_candidates": 30,
         "rerank_alpha": 0.5,
+        "multi_variant_rerank_enabled": False,
     },
     "query_expansion": {
         "enabled": True,

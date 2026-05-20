@@ -7,6 +7,7 @@ retrieval:
   weight_bm25: 0.75
   rerank_candidates: 30
   rerank_alpha: 0.5
+  multi_variant_rerank_enabled: false
 
 query_expansion:
   enabled: true

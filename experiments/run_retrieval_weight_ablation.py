@@ -12,15 +12,14 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
-DEFAULT_SWEEP_VALUES = [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0]
+DEFAULT_SWEEP_VALUES = [round(x * 0.1, 1) for x in range(11)]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run retrieval-focused single-variable ablations on one document: "
-            "bm25:vector ratio sweep, retrieval translation ratio sweep, and rerank alpha sweep. "
-            "Non-target variables are fixed to 0.5 by default."
+            "Run focused ablation for query expansion ratio with fixed bm25 ratio, "
+            "fixed rerank alpha, and rerank-candidates sweep."
         )
     )
     parser.add_argument(
@@ -60,27 +59,27 @@ def parse_args() -> argparse.Namespace:
         "--bm25-ratios",
         type=float,
         nargs="*",
-        default=DEFAULT_SWEEP_VALUES,
-        help="BM25 ratio values in [0,1] for bm25:vector ratio sweep (w_vec=1-r, w_bm25=r).",
+        default=[0.2],
+        help="Fixed BM25 ratio list (default: 0.2).",
     )
     parser.add_argument(
         "--translation-ratios",
         type=float,
         nargs="*",
         default=DEFAULT_SWEEP_VALUES,
-        help="Retrieval-side translation ratio values in [0,1] (secondary_variant_weight sweep).",
+        help="Query expansion ratio values in [0,1] (mapped to secondary_variant_weight sweep).",
     )
     parser.add_argument(
         "--rerank-alphas",
         type=float,
         nargs="*",
-        default=DEFAULT_SWEEP_VALUES,
-        help="Rerank translation fusion alpha values in [0,1] (alpha*src + (1-alpha)*translated).",
+        default=[0.5],
+        help="Fixed rerank alpha list (default: 0.5).",
     )
     parser.add_argument(
         "--fixed-bm25-ratio",
         type=float,
-        default=0.5,
+        default=0.2,
         help="Fixed bm25 ratio used when sweeping other variables.",
     )
     parser.add_argument(
@@ -111,7 +110,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dynamic-topk-ratio",
         type=str,
-        default="0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9",
+        default="0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09,0.10,0.20,0.30,0.40,0.50,0.60,0.70,0.80,0.90",
         help=(
             "Comma-separated dynamic top-k ratios. "
             "For each ratio r, keep candidates with score >= r * max_score."
@@ -121,7 +120,7 @@ def parse_args() -> argparse.Namespace:
         "--rerank-candidates",
         type=int,
         nargs="*",
-        default=[30],
+        default=[10, 20, 30],
         help="List of candidate counts to send to rerank stage (e.g. --rerank-candidates 10 20 30 40).",
     )
     parser.add_argument(
@@ -170,6 +169,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expansion-paraphrases", type=int, default=None)
     parser.add_argument("--expansion-add-translation", type=str, default=None)
     parser.add_argument("--expansion-source-lang", type=str, default=None)
+    parser.add_argument("--enable-multi-variant-rerank", type=str, default="false")
+    parser.add_argument("--enable-cache", type=str, default="false")
+    parser.add_argument("--enable-memory", type=str, default="false")
     return parser.parse_args()
 
 
@@ -342,75 +344,23 @@ def build_run_plan(args: argparse.Namespace) -> list[dict]:
         if not (0.0 <= v <= 1.0):
             raise ValueError(f"--{name} must be in [0,1], got: {v}")
 
-    plan = []
-    # A) Sweep bm25:vector ratio, fix retrieval translation ratio + rerank alpha.
-    for bm25_ratio in bm25_ratios:
-        tr = fixed_translation_ratio
-        alpha = fixed_rerank_alpha
-        svw = 1.0 if args.variant_mode == "primary_only" else tr
-        for rc in rerank_candidates:
-            run_id = (
-                f"bm25_ratio__r{_weight_slug(bm25_ratio)}"
-                f"__tr{_weight_slug(tr)}__ra{_weight_slug(alpha)}__rc{rc}"
-            )
-            plan.append(
-                {
-                    "run_id": run_id,
-                    "sweep_group": "bm25_ratio",
-                    "sweep_var": "bm25_ratio",
-                    "sweep_value": float(bm25_ratio),
-                    "weight_vec": float(1.0 - bm25_ratio),
-                    "weight_bm25": float(bm25_ratio),
-                    "variant_mode": args.variant_mode,
-                    "secondary_variant_weight": float(svw),
-                    "translation_ratio": float(tr),
-                    "rerank_alpha": float(alpha),
-                    "rerank_candidates": int(rc),
-                }
-            )
+    bm25_ratio = bm25_ratios[0] if bm25_ratios else fixed_bm25_ratio
+    alpha = rerank_alphas[0] if rerank_alphas else fixed_rerank_alpha
 
-    # B) Sweep retrieval translation ratio, fix bm25 ratio + rerank alpha.
+    plan = []
     for tr in translation_ratios:
-        bm25_ratio = fixed_bm25_ratio
-        alpha = fixed_rerank_alpha
         svw = 1.0 if args.variant_mode == "primary_only" else tr
         for rc in rerank_candidates:
             run_id = (
-                f"translation_ratio__r{_weight_slug(tr)}"
+                f"qe_ratio__r{_weight_slug(tr)}"
                 f"__bm25{_weight_slug(bm25_ratio)}__ra{_weight_slug(alpha)}__rc{rc}"
             )
             plan.append(
                 {
                     "run_id": run_id,
-                    "sweep_group": "translation_ratio",
-                    "sweep_var": "translation_ratio",
+                    "sweep_group": "query_expansion_ratio",
+                    "sweep_var": "query_expansion_ratio",
                     "sweep_value": float(tr),
-                    "weight_vec": float(1.0 - bm25_ratio),
-                    "weight_bm25": float(bm25_ratio),
-                    "variant_mode": args.variant_mode,
-                    "secondary_variant_weight": float(svw),
-                    "translation_ratio": float(tr),
-                    "rerank_alpha": float(alpha),
-                    "rerank_candidates": int(rc),
-                }
-            )
-
-    # C) Sweep rerank translation alpha, fix bm25 ratio + retrieval translation ratio.
-    for alpha in rerank_alphas:
-        bm25_ratio = fixed_bm25_ratio
-        tr = fixed_translation_ratio
-        svw = 1.0 if args.variant_mode == "primary_only" else tr
-        for rc in rerank_candidates:
-            run_id = (
-                f"rerank_alpha__r{_weight_slug(alpha)}"
-                f"__bm25{_weight_slug(bm25_ratio)}__tr{_weight_slug(tr)}__rc{rc}"
-            )
-            plan.append(
-                {
-                    "run_id": run_id,
-                    "sweep_group": "rerank_alpha",
-                    "sweep_var": "rerank_alpha",
-                    "sweep_value": float(alpha),
                     "weight_vec": float(1.0 - bm25_ratio),
                     "weight_bm25": float(bm25_ratio),
                     "variant_mode": args.variant_mode,
@@ -658,10 +608,10 @@ def summarize_run_rows(rows: list[dict]) -> dict:
         "avg_rerank_top1_score": _safe_mean(rerank_top1_scores),
         "avg_rerank_margin_top1_top2": _safe_mean(rerank_margin),
         "unique_rerank_top1_chunks": len({r["rerank_top1_preview"] for r in rows if r["rerank_top1_preview"]}),
-        "hit_at_1_count": sum(int(r.get("hit_at_1", 0)) for r in rows),
-        "hit_at_5_count": sum(int(r.get("hit_at_5", 0)) for r in rows),
-        "hit_at_8_count": sum(int(r.get("hit_at_8", 0)) for r in rows),
-        "hit_at_dynamic_k_count": sum(int(r.get("hit_at_dynamic_k", 0)) for r in rows),
+        "avg_hit_at_1": _safe_mean([float(r.get("hit_at_1", 0.0)) for r in rows]),
+        "avg_hit_at_5": _safe_mean([float(r.get("hit_at_5", 0.0)) for r in rows]),
+        "avg_hit_at_8": _safe_mean([float(r.get("hit_at_8", 0.0)) for r in rows]),
+        "avg_hit_at_dynamic_k": _safe_mean([float(r.get("hit_at_dynamic_k", 0.0)) for r in rows]),
         "avg_dynamic_k": _safe_mean([float(r.get("dynamic_k", 0)) for r in rows]) if rows else 0.0,
     }
 
@@ -730,32 +680,27 @@ def build_markdown_summary(
             "",
         "## Run Summary",
         "",
-        "| Run ID | Sweep | Value | Variant Mode | w_vec | w_bm25 | Translation Ratio | Rerank Alpha | Hit@1 | Hit@5 | Hit@8 | Hit@DynamicK | Avg Dynamic-K | Avg Rerank Top1 | Avg Margin(1-2) |",
+        "| Run ID | Sweep | Value | Variant Mode | w_vec | w_bm25 | Translation Ratio | Rerank Alpha | Hit@1 (avg) | Hit@5 (avg) | Hit@8 (avg) | Hit@DynamicK (avg) | Avg Dynamic-K | Avg Rerank Top1 | Avg Margin(1-2) |",
         "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for row in run_summaries:
-        q = max(int(row.get("questions", 0)), 1)
-        h1 = int(row.get("hit_at_1_count", 0))
-        h5 = int(row.get("hit_at_5_count", 0))
-        h8 = int(row.get("hit_at_8_count", 0))
-        hd = int(row.get("hit_at_dynamic_k_count", 0))
-        h1_pct = (h1 / q) * 100.0
-        h5_pct = (h5 / q) * 100.0
-        h8_pct = (h8 / q) * 100.0
-        hd_pct = (hd / q) * 100.0
+        h1 = float(row.get("avg_hit_at_1", 0.0))
+        h5 = float(row.get("avg_hit_at_5", 0.0))
+        h8 = float(row.get("avg_hit_at_8", 0.0))
+        hd = float(row.get("avg_hit_at_dynamic_k", 0.0))
         lines.append(
             f"| {row['run_id']} | {row['sweep_group']} | {row['sweep_value']:.2f} | {row['variant_mode']} | "
             f"{row['weight_vec']:.2f} | {row['weight_bm25']:.2f} | {row['translation_ratio']:.2f} | {row['rerank_alpha']:.2f} | {row.get('rerank_candidates', '')} | "
-            f"{h1}/{q} ({h1_pct:.2f}%) | {h5}/{q} ({h5_pct:.2f}%) | {h8}/{q} ({h8_pct:.2f}%) | "
-            f"{hd}/{q} ({hd_pct:.2f}%) | {row.get('avg_dynamic_k', 0.0):.2f} | "
+            f"{h1:.4f} | {h5:.4f} | {h8:.4f} | "
+            f"{hd:.4f} | {row.get('avg_dynamic_k', 0.0):.2f} | "
             f"{row['avg_rerank_top1_score']:.4f} | {row['avg_rerank_margin_top1_top2']:.4f} |"
         )
 
     lines.extend(["", "## Dynamic-K Ratio Breakdown", ""])
     dyn_headers = []
     for ratio in dynamic_topk_ratios:
-        dyn_headers.extend([f"r={ratio:.2f} Hit", f"r={ratio:.2f} AvgK"])
+        dyn_headers.extend([f"r={ratio:.2f} Hit(avg)", f"r={ratio:.2f} AvgK"])
     lines.append("| Run ID | " + " | ".join(dyn_headers) + " |")
     lines.append("| --- | " + " | ".join(["---:"] * len(dyn_headers)) + " |")
 
@@ -771,17 +716,17 @@ def build_markdown_summary(
         cells = []
         for ratio in dynamic_topk_ratios:
             key = f"{ratio:.4f}"
-            hit_count = 0
+            hit_sum = 0.0
             sum_k = 0
             for qrow in run_q_rows:
                 dyn_map = _parse_dynamic_map(qrow.get("dynamic_by_ratio", {}))
                 dyn = dyn_map.get(key, {})
                 if isinstance(dyn, dict):
-                    hit_count += int(dyn.get("hit", 0))
+                    hit_sum += float(dyn.get("hit", 0.0))
                     sum_k += int(dyn.get("k", 0))
-            hit_pct = (hit_count / q) * 100.0
+            hit_avg = (hit_sum / q) if q else 0.0
             avg_k = (sum_k / q) if q else 0.0
-            cells.append(f"{hit_count}/{q} ({hit_pct:.2f}%)")
+            cells.append(f"{hit_avg:.4f}")
             cells.append(f"{avg_k:.2f}")
         lines.append(f"| {run_id} | " + " | ".join(cells) + " |")
 
@@ -794,17 +739,16 @@ def build_markdown_summary(
             "",
             "### What each plotted metric means",
             "",
-            f"- `Hit@1`: number of questions where all `gold_chunk_ids` are covered in top-W rerank results with W=max(1, G), G=len(`gold_chunk_ids`) (`hit_at_1_count`, out of `Q`).",
-            f"- `Hit@5`: number of questions where all `gold_chunk_ids` are covered in top-W rerank results with W=max(5, G), G=len(`gold_chunk_ids`) (`hit_at_5_count`, out of `Q`).",
-            f"- `Hit@8`: number of questions where all `gold_chunk_ids` are covered in top-W rerank results with W=max(8, G), G=len(`gold_chunk_ids`) (`hit_at_8_count`, out of `Q`).",
-            f"- `Hit@DynamicK(r={dynamic_topk_ratios[0]:.2f})`: for each question, keep rerank rows with `score >= r * max_score`; count as hit only when all `gold_chunk_ids` are covered.",
+            "- `Hit@K`: per-question gold coverage ratio in Top-K rerank results: `|TopK ∩ Gold| / |Gold|` (range 0~1).",
+            "- Top-K is strict: always uses exactly K rows (no `max(K,G)` window expansion).",
+            f"- `Hit@DynamicK(r={dynamic_topk_ratios[0]:.2f})`: per-question gold coverage ratio in rows kept by `score >= r * max_score`.",
             "- `Avg Dynamic-K`: average number of kept rows under the dynamic threshold rule above.",
             "",
             "### How metrics are computed",
             "",
             "- Matching is strict chunk-level: rerank preview is mapped to chunk id, then compared to `gold_chunk_ids`.",
             "- Each point in a curve is aggregated over all questions in one run.",
-            "- In `metrics_vs_*.png`, Y values are hit counts (not percentages). Convert to accuracy by `count / Q`.",
+            "- In `metrics_vs_*.png`, Y values are average coverage ratios (0~1).",
             f"- For dynamic-k across all ratios ({dynamic_topk_ratios[0]:.1f}~{dynamic_topk_ratios[-1]:.1f}), use the `Dynamic-K Ratio Breakdown` table above.",
             "",
             "### What each figure file shows",
@@ -955,10 +899,10 @@ def build_line_plots(
     plots_dir.mkdir(parents=True, exist_ok=True)
 
     metric_lines = [
-        ("hit_at_1_count", "Hit@1"),
-        ("hit_at_5_count", "Hit@5"),
-        ("hit_at_8_count", "Hit@8"),
-        ("hit_at_dynamic_k_count", f"Hit@DynamicK(r={dynamic_topk_ratio:.2f})"),
+        ("avg_hit_at_1", "Hit@1"),
+        ("avg_hit_at_5", "Hit@5"),
+        ("avg_hit_at_8", "Hit@8"),
+        ("avg_hit_at_dynamic_k", f"Hit@DynamicK(r={dynamic_topk_ratio:.2f})"),
     ]
     sweep_titles = {
         "bm25_ratio": ("BM25 Ratio", "bm25_ratio"),
@@ -999,7 +943,7 @@ def build_line_plots(
         ax.set_title(f"Retrieval Metrics vs {xlabel} (All Rerank Candidates)")
         ax.set_xlabel(xlabel)
         ax.set_ylabel("Rate")
-        ax.set_ylim(0.0, 1.05)
+        ax.set_ylim(0.6, 1.0)
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=8)
         out = plots_dir / f"metrics_vs_{slug}.png"
@@ -1046,7 +990,7 @@ def build_line_plots(
                 ax.set_title(f"RC = {rc}")
                 ax.set_xlabel(xlabel)
                 ax.set_ylabel("Rate")
-                ax.set_ylim(0.0, 1.05)
+                ax.set_ylim(0.6, 1.0)
                 ax.grid(True, alpha=0.3)
                 ax.legend(loc="best", fontsize=7)
 
@@ -1170,7 +1114,7 @@ def build_line_plots(
                 ax.set_title(f"Retrieval Metrics vs {xlabel} (RC={rc})")
                 ax.set_xlabel(xlabel)
                 ax.set_ylabel("Rate")
-                ax.set_ylim(0.0, 1.05)
+                ax.set_ylim(0.6, 1.0)
                 ax.grid(True, alpha=0.3)
                 ax.legend(loc="best", fontsize=8)
                 out = plots_dir / f"metrics_vs_{slug}_rc{rc}.png"
@@ -1225,7 +1169,7 @@ def build_line_plots(
         ax.set_title("All Hit@X Metrics vs Rerank Candidates (Composite)")
         ax.set_xlabel("Rerank candidates")
         ax.set_ylabel("Rate")
-        ax.set_ylim(0.0, 1.05)
+        ax.set_ylim(0.6, 1.0)
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=8)
         out = plots_dir / f"metrics_vs_rerank_candidates_composite.png"
@@ -1301,7 +1245,7 @@ def build_line_plots(
                 ax2.tick_params(axis="y", labelcolor=color_right)
                 ax.grid(True, alpha=0.3)
                 ax.set_ylim(0.0, max(ys_dyn) * 1.2 if ys_dyn else 10)
-                ax2.set_ylim(0.0, 1.05)
+                ax2.set_ylim(0.6, 1.0)
                 
                 lines = [line1, line2]
                 labels = [line.get_label() for line in lines]
@@ -1326,7 +1270,7 @@ def build_line_plots(
                     ys_hit_dyn.append(0.0)
                 else:
                     ys_dyn.append(sum(float(r.get("avg_dynamic_k", 0.0)) for r in rows) / len(rows))
-                    hit_dyn_rate = sum(int(r.get("hit_at_dynamic_k_count", 0)) for r in rows) / max(sum(int(r.get("questions", 0)) for r in rows), 1)
+                    hit_dyn_rate = sum(float(r.get("avg_hit_at_dynamic_k", 0.0)) for r in rows) / len(rows)
                     ys_hit_dyn.append(hit_dyn_rate)
             
             ax2 = ax.twinx()
@@ -1346,7 +1290,7 @@ def build_line_plots(
             ax2.tick_params(axis="y", labelcolor="#ff7f0e")
             ax.grid(True, alpha=0.3)
             ax.set_ylim(0.0, max(ys_dyn) * 1.2 if ys_dyn else 10)
-            ax2.set_ylim(0.0, 1.05)
+            ax2.set_ylim(0.6, 1.0)
             
             lines = [line1, line2]
             labels = [line.get_label() for line in lines]
@@ -1375,7 +1319,7 @@ def build_line_plots(
             ax.set_title(f"{label} vs Rerank Candidates")
             ax.set_xlabel("Rerank candidates")
             ax.set_ylabel("Rate")
-            ax.set_ylim(0.0, 1.05)
+            ax.set_ylim(0.6, 1.0)
             ax.grid(True, alpha=0.3)
             ax.legend(loc="best", fontsize=8)
             out = plots_dir / f"metrics_vs_rerank_candidates_{metric_key}.png"
@@ -1451,7 +1395,7 @@ def build_line_plots(
         ax.set_title("Dynamic Ratio vs Accuracy")
         ax.set_xlabel("Dynamic ratio r")
         ax.set_ylabel("Accuracy")
-        ax.set_ylim(0.0, 1.05)
+        ax.set_ylim(0.6, 1.0)
         ax.set_xticks(ratio_x)
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=8)
@@ -1509,7 +1453,7 @@ def build_line_plots(
         ax.set_title("Dynamic Ratio vs Accuracy with Fixed Top-K Baselines")
         ax.set_xlabel("Dynamic ratio r")
         ax.set_ylabel("Accuracy")
-        ax.set_ylim(0.0, 1.05)
+        ax.set_ylim(0.6, 1.0)
         ax.set_xticks(ratio_x)
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=8, ncol=2)
@@ -1613,11 +1557,14 @@ def main() -> None:
             "--rerank-candidates", str(item.get("rerank_candidates", 30)),
         ]
         optional_overrides = [
-            ("--enable-query-expansion", args.enable_query_expansion),
+            ("--enable-query-expansion", args.enable_query_expansion if args.enable_query_expansion is not None else "true"),
             ("--expansion-model", args.expansion_model),
             ("--expansion-paraphrases", args.expansion_paraphrases),
             ("--expansion-add-translation", args.expansion_add_translation),
             ("--expansion-source-lang", args.expansion_source_lang),
+            ("--enable-multi-variant-rerank", args.enable_multi_variant_rerank),
+            ("--enable-cache", args.enable_cache),
+            ("--enable-memory", args.enable_memory),
         ]
         for flag, value in optional_overrides:
             if value is not None:
@@ -1690,17 +1637,17 @@ def main() -> None:
 
             eval_limit = max(max_eval_k, len(gold_chunk_ids))
             eval_rows = rerank_rows[:eval_limit]
-            hit_map = {k: 0 for k in eval_topks}
-            fixed_hit_map = {k: 0 for k in range(1, 9)}
+            hit_map = {k: 0.0 for k in eval_topks}
+            fixed_hit_map = {k: 0.0 for k in range(1, 9)}
             top1_matched_chunk_ids = []
-            dynamic_by_ratio = {f"{ratio:.4f}": {"k": 0, "hit": 0} for ratio in dynamic_topk_ratios}
+            dynamic_by_ratio = {f"{ratio:.4f}": {"k": 0, "hit": 0.0} for ratio in dynamic_topk_ratios}
             if eval_rows and gold_chunk_ids and chunk_catalog.get("chunks"):
                 for rr in eval_rows:
                     rr["matched_chunk_ids"] = match_preview_to_chunk_ids(rr.get("preview", ""), chunk_catalog)
                 top1_matched_chunk_ids = eval_rows[0].get("matched_chunk_ids", [])
                 gold_chunk_id_set = set(gold_chunk_ids)
                 for k in range(1, 9):
-                    window_k = max(k, len(gold_chunk_id_set))
+                    window_k = k
                     considered = eval_rows[:window_k]
                     covered_chunk_ids = {
                         cid
@@ -1708,9 +1655,9 @@ def main() -> None:
                         for cid in rr.get("matched_chunk_ids", [])
                         if cid in gold_chunk_id_set
                     }
-                    fixed_hit_map[k] = 1 if gold_chunk_id_set.issubset(covered_chunk_ids) else 0
+                    fixed_hit_map[k] = (len(covered_chunk_ids) / len(gold_chunk_id_set)) if gold_chunk_id_set else 0.0
                 for k in eval_topks:
-                    window_k = max(k, len(gold_chunk_id_set))
+                    window_k = k
                     considered = eval_rows[:window_k]
                     covered_chunk_ids = {
                         cid
@@ -1718,7 +1665,7 @@ def main() -> None:
                         for cid in rr.get("matched_chunk_ids", [])
                         if cid in gold_chunk_id_set
                     }
-                    hit_map[k] = 1 if gold_chunk_id_set.issubset(covered_chunk_ids) else 0
+                    hit_map[k] = (len(covered_chunk_ids) / len(gold_chunk_id_set)) if gold_chunk_id_set else 0.0
                 max_score = eval_rows[0].get("score")
                 if isinstance(max_score, (int, float)):
                     max_score_f = float(max_score)
@@ -1735,7 +1682,7 @@ def main() -> None:
                             for cid in rr.get("matched_chunk_ids", [])
                             if cid in gold_chunk_id_set
                         }
-                        dynamic_hit = 1 if gold_chunk_id_set.issubset(dynamic_covered_chunk_ids) else 0
+                        dynamic_hit = (len(dynamic_covered_chunk_ids) / len(gold_chunk_id_set)) if gold_chunk_id_set else 0.0
                         dynamic_by_ratio[f"{ratio:.4f}"] = {"k": dynamic_k, "hit": dynamic_hit}
 
             first_ratio_key = f"{dynamic_topk_ratios[0]:.4f}"
@@ -1813,12 +1760,12 @@ def main() -> None:
             }
         )
 
+    # Backward-compatible aliases: keep *_rate equal to averaged coverage ratio.
     for summary in interaction_summary_rows:
-        q = max(int(summary.get("questions", 0)), 1)
-        summary["hit_at_1_rate"] = round(summary.get("hit_at_1_count", 0) / q, 4)
-        summary["hit_at_5_rate"] = round(summary.get("hit_at_5_count", 0) / q, 4)
-        summary["hit_at_8_rate"] = round(summary.get("hit_at_8_count", 0) / q, 4)
-        summary["hit_at_dynamic_k_rate"] = round(summary.get("hit_at_dynamic_k_count", 0) / q, 4)
+        summary["hit_at_1_rate"] = float(summary.get("avg_hit_at_1", 0.0))
+        summary["hit_at_5_rate"] = float(summary.get("avg_hit_at_5", 0.0))
+        summary["hit_at_8_rate"] = float(summary.get("avg_hit_at_8", 0.0))
+        summary["hit_at_dynamic_k_rate"] = float(summary.get("avg_hit_at_dynamic_k", 0.0))
 
     write_json(
         run_dir / "runs.json",
@@ -1909,13 +1856,13 @@ def main() -> None:
             "avg_rerank_top1_score",
             "avg_rerank_margin_top1_top2",
             "unique_rerank_top1_chunks",
-            "hit_at_1_count",
+            "avg_hit_at_1",
             "hit_at_1_rate",
-            "hit_at_5_count",
+            "avg_hit_at_5",
             "hit_at_5_rate",
-            "hit_at_8_count",
+            "avg_hit_at_8",
             "hit_at_8_rate",
-            "hit_at_dynamic_k_count",
+            "avg_hit_at_dynamic_k",
             "hit_at_dynamic_k_rate",
             "avg_dynamic_k",
         ],

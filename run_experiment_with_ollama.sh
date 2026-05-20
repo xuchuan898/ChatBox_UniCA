@@ -38,12 +38,19 @@ ollama list
 ps aux | grep ollama || true
 ollama pull gemma3:1b
 
-# Launch experiment script with default settings for master.md only.
+# Launch focused query-expansion-ratio experiment.
 # Extra CLI args can still be appended to override these defaults.
-python experiments/run_format_experiment.py \
+python experiments/run_retrieval_weight_ablation.py \
   --auto-start-ollama \
-  --docs docs/chroma/master.md \
+  --doc-file docs/chroma/master.md \
   --question-file questions/questions_batch_student_short_typo_en_fr.txt \
   --gold-file questions/questions_batch_student_short_typo_en_fr_gold.json \
-  --dynamic-topk-ratio 0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9 \
+  --bm25-ratios 0.2 \
+  --translation-ratios 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+  --rerank-candidates 10 20 30 \
+  --enable-query-expansion true \
+  --enable-multi-variant-rerank false \
+  --enable-cache false \
+  --enable-memory false \
+  --dynamic-topk-ratio 0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09,0.10,0.20,0.30,0.40,0.50,0.60,0.70,0.80,0.90 \
   "$@"
