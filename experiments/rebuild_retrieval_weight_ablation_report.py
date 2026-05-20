@@ -828,6 +828,11 @@ def main() -> None:
         r for r in interaction_summary_rows
         if int(r.get("exit_code", 1)) == 0 and int(r.get("retrieval_blocks", 0)) > 0
     ]
+    valid_run_ids = {r["run_id"] for r in valid_summaries}
+    valid_question_rows = [
+        r for r in question_level_rows
+        if r.get("run_id") in valid_run_ids
+    ] if valid_run_ids else question_level_rows
     plot_files: list[str] = []
     if not args.no_plots:
         plots_dir = output_dir / "plots"
@@ -841,7 +846,7 @@ def main() -> None:
         plot_files.extend(
             reference.build_dynamic_ratio_plots(
                 run_dir=output_dir,
-                question_rows=question_level_rows,
+                question_rows=valid_question_rows,
                 dynamic_topk_ratios=dynamic_topk_ratios,
             )
         )
