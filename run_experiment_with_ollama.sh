@@ -36,7 +36,7 @@ nohup ~/ollama/bin/ollama serve > ~/ollama/ollama.log 2>&1 &
 # Quick checks requested by user.
 ollama list
 ps aux | grep ollama || true
-ollama pull gemma3:1b
+ollama pull gemma3:4b
 
 # Launch focused query-expansion-ratio experiment.
 # Extra CLI args can still be appended to override these defaults.

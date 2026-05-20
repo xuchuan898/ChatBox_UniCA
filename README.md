@@ -27,7 +27,7 @@ pip install docling
 
 Ensure Ollama model exists:
 ```bash
-ollama pull gemma3:1b
+ollama pull gemma3:4b
 ```
 
 ## Build / Load Index
@@ -56,7 +56,7 @@ python chat_box.py --doc-file ./docs/chroma/master.md --question-file ./question
 
 Enable query expansion controls:
 ```bash
-python chat_box.py --enable-query-expansion true --expansion-model gemma3:1b --expansion-paraphrases 1 --expansion-add-translation true --expansion-source-lang auto
+python chat_box.py --enable-query-expansion true --expansion-model gemma3:4b --expansion-paraphrases 1 --expansion-add-translation true --expansion-source-lang auto
 ```
 
 Enable cache controls:

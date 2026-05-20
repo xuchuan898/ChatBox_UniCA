@@ -10,7 +10,7 @@ cd "$SCRIPT_DIR"
 
 # -------- configurable defaults --------
 OLLAMA_HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
-OLLAMA_MODEL="${OLLAMA_MODEL:-gemma3:1b}"
+OLLAMA_MODEL="${OLLAMA_MODEL:-gemma3:4b}"
 OLLAMA_BIN_DIR="${OLLAMA_BIN_DIR:-$HOME/ollama/bin}"
 OLLAMA_LOG_FILE="${OLLAMA_LOG_FILE:-$HOME/ollama/ollama.log}"
 USER_AGENT_VALUE="${USER_AGENT_VALUE:-MyChatBot/1.0}"
@@ -71,4 +71,3 @@ echo "[INFO] Ensuring model exists: $OLLAMA_MODEL"
 
 echo "[INFO] Launching chat_box.py"
 python chat_box.py "$@"
-

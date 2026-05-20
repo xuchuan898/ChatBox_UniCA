@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import time
@@ -121,7 +122,7 @@ def _build_query_expander(config: dict[str, Any]) -> QueryExpander:
     if qe_cfg.get("rewriter") == "passthrough":
         rewriter = PassthroughRewriter()
     else:
-        rewriter = OllamaRewriter(model_name=qe_cfg.get("model_name", "gemma3:1b"))
+        rewriter = OllamaRewriter(model_name=qe_cfg.get("model_name", "gemma3:4b"))
     return QueryExpander(
         rewriter=rewriter,
         num_paraphrases=int(qe_cfg.get("num_paraphrases", 1)),
@@ -174,6 +175,24 @@ def _serialize_docs(docs: list[Document]) -> list[dict[str, Any]]:
     return [{"chunk_id": d.metadata.get("chunk_id"), "source": d.metadata.get("source"), "preview": d.page_content[:220]} for d in docs]
 
 
+def _write_chunks_jsonl(path: str, corpus: list[Document]) -> None:
+    with Path(path).open("w", encoding="utf-8") as handle:
+        for idx, doc in enumerate(corpus):
+            handle.write(
+                json.dumps(
+                    {
+                        "chunk_id": doc.metadata.get("chunk_id", idx),
+                        "content": doc.page_content,
+                        "chunk_type": doc.metadata.get("chunk_type", "unknown"),
+                        "source": doc.metadata.get("source", "unknown"),
+                        "length": len(doc.page_content),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+
+
 def main() -> None:
     os.environ["USER_AGENT"] = "MyChatBot/1.0"
     args = parse_args()
@@ -206,6 +225,10 @@ def main() -> None:
         force_rebuild=bool(config["indexing"]["force_rebuild"]),
         debug=args.debug,
     )
+    if args.save_chunks_file:
+        _write_chunks_jsonl(args.save_chunks_file, state["corpus"])
+        if args.debug:
+            print(f"[DEBUG][CHUNKS] saved={args.save_chunks_file} count={len(state['corpus'])}")
     if args.debug:
         meta = state.get("meta", {})
         print(

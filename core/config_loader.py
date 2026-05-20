@@ -21,7 +21,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "query_expansion": {
         "enabled": True,
         "rewriter": "ollama",
-        "model_name": "gemma3:1b",
+        "model_name": "gemma3:4b",
         "num_paraphrases": 1,
         "add_translation": True,
         "source_lang": "auto",
@@ -29,7 +29,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "cache": {"enabled": True, "threshold": 0.92, "ttl": 86400},
     "memory": {"enabled": True, "short_term_rounds": 5},
-    "generation": {"model_name": "gemma3:1b", "temperature": 0.0, "num_predict": 256},
+    "generation": {"model_name": "gemma3:4b", "temperature": 0.0, "num_predict": 256},
 }
 
 

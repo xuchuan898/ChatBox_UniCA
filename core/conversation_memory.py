@@ -12,7 +12,7 @@ from langchain_ollama import ChatOllama
 class ConversationMemory:
     """Conversation memory manager."""
 
-    def __init__(self, rounds: int = 5, memory_file: str | Path = "./index_store/user_memory.json", model_name: str = "gemma3:1b"):
+    def __init__(self, rounds: int = 5, memory_file: str | Path = "./index_store/user_memory.json", model_name: str = "gemma3:4b"):
         self.rounds = max(1, rounds)
         self.short_term = deque(maxlen=self.rounds)
         self.path = Path(memory_file)

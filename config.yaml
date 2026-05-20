@@ -12,7 +12,7 @@ retrieval:
 query_expansion:
   enabled: true
   rewriter: "ollama"
-  model_name: "gemma3:1b"
+  model_name: "gemma3:4b"
   num_paraphrases: 1
   add_translation: true
   source_lang: "auto"
@@ -28,6 +28,6 @@ memory:
   short_term_rounds: 5
 
 generation:
-  model_name: "gemma3:1b"
+  model_name: "gemma3:4b"
   temperature: 0.0
   num_predict: 256
