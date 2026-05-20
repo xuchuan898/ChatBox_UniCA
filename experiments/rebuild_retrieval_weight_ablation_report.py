@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import pickle
 import re
 import statistics
+import shutil
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -261,6 +263,50 @@ def safe_mean(values: list[float]) -> float:
     return round(statistics.mean(values), 4) if values else 0.0
 
 
+def _normalize_for_match(text: str) -> str:
+    lowered = text.lower()
+    lowered = re.sub(r"[^a-z0-9àâçéèêëîïôûùüÿœ\s]", " ", lowered)
+    lowered = re.sub(r"\s+", " ", lowered).strip()
+    return lowered
+
+
+def _build_chunk_catalog_from_corpus_pickle(path: Path) -> dict[str, Any]:
+    catalog = {"path": str(path), "chunks": [], "by_context": {}}
+    if not path.exists():
+        return catalog
+    with path.open("rb") as handle:
+        corpus = pickle.load(handle)
+    chunks: list[dict[str, Any]] = []
+    by_context: dict[str, list[int]] = {}
+    for idx, doc in enumerate(corpus or []):
+        content = str(getattr(doc, "page_content", "") or "")
+        meta = getattr(doc, "metadata", {}) or {}
+        context = str(meta.get("context", "") or "")
+        if not context:
+            context = reference_extract_context_label(content)
+        norm_content = _normalize_for_match(content)
+        norm_context = _normalize_for_match(context)
+        item = {
+            "chunk_id": idx,
+            "content": content,
+            "norm_content": norm_content,
+            "context": context,
+            "norm_context": norm_context,
+            "chunk_type": str(meta.get("chunk_type", "") or ""),
+        }
+        chunks.append(item)
+        if norm_context:
+            by_context.setdefault(norm_context, []).append(idx)
+    catalog["chunks"] = chunks
+    catalog["by_context"] = by_context
+    return catalog
+
+
+def reference_extract_context_label(text: str) -> str:
+    match = re.search(r"\[Context:\s*(.*?)\]", text or "", flags=re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
 def rebuild_run_rows(
     reference: ModuleType,
     run_item: dict[str, Any],
@@ -301,9 +347,9 @@ def rebuild_run_rows(
         eval_limit = max(max_eval_k, len(gold_chunk_ids))
         eval_rows = rerank_rows[:eval_limit]
 
-        hit_map = {k: 0 for k in eval_topks}
-        fixed_hit_map = {k: 0 for k in range(1, 9)}
-        dynamic_by_ratio = {f"{ratio:.4f}": {"k": 0, "hit": 0} for ratio in dynamic_topk_ratios}
+        hit_map = {k: 0.0 for k in eval_topks}
+        fixed_hit_map = {k: 0.0 for k in range(1, 9)}
+        dynamic_by_ratio = {f"{ratio:.4f}": {"k": 0, "hit": 0.0} for ratio in dynamic_topk_ratios}
         top1_matched_chunk_ids: list[int] = []
 
         if eval_rows and gold_chunk_ids:
@@ -312,7 +358,7 @@ def rebuild_run_rows(
             top1_matched_chunk_ids = list(eval_rows[0].get("matched_chunk_ids", []))
 
             for k in range(1, 9):
-                window_k = max(k, len(gold_chunk_id_set))
+                window_k = k
                 considered = eval_rows[:window_k]
                 covered_chunk_ids = {
                     cid
@@ -320,10 +366,10 @@ def rebuild_run_rows(
                     for cid in rr.get("matched_chunk_ids", [])
                     if cid in gold_chunk_id_set
                 }
-                fixed_hit_map[k] = 1 if gold_chunk_id_set.issubset(covered_chunk_ids) else 0
+                fixed_hit_map[k] = (len(covered_chunk_ids) / len(gold_chunk_id_set)) if gold_chunk_id_set else 0.0
 
             for k in eval_topks:
-                window_k = max(k, len(gold_chunk_id_set))
+                window_k = k
                 considered = eval_rows[:window_k]
                 covered_chunk_ids = {
                     cid
@@ -331,7 +377,7 @@ def rebuild_run_rows(
                     for cid in rr.get("matched_chunk_ids", [])
                     if cid in gold_chunk_id_set
                 }
-                hit_map[k] = 1 if gold_chunk_id_set.issubset(covered_chunk_ids) else 0
+                hit_map[k] = (len(covered_chunk_ids) / len(gold_chunk_id_set)) if gold_chunk_id_set else 0.0
 
             max_score = eval_rows[0].get("score")
             if isinstance(max_score, (int, float)):
@@ -349,7 +395,7 @@ def rebuild_run_rows(
                         for cid in rr.get("matched_chunk_ids", [])
                         if cid in gold_chunk_id_set
                     }
-                    dynamic_hit = 1 if gold_chunk_id_set.issubset(dynamic_covered_chunk_ids) else 0
+                    dynamic_hit = (len(dynamic_covered_chunk_ids) / len(gold_chunk_id_set)) if gold_chunk_id_set else 0.0
                     dynamic_by_ratio[f"{ratio:.4f}"] = {"k": dynamic_k, "hit": dynamic_hit}
 
         first_ratio_key = f"{dynamic_topk_ratios[0]:.4f}"
@@ -382,7 +428,7 @@ def rebuild_run_rows(
             "top1_matched_chunk_ids": "|".join(str(cid) for cid in top1_matched_chunk_ids),
             "dynamic_k": first_dynamic.get("k", 0),
             "dynamic_ratio": first_ratio_key,
-            "hit_at_dynamic_k": first_dynamic.get("hit", 0),
+            "hit_at_dynamic_k": first_dynamic.get("hit", 0.0),
             "dynamic_by_ratio": json.dumps(dynamic_by_ratio, ensure_ascii=False),
         }
         # Initialize all fixed hit_at_k fields from 1 to 8
@@ -594,6 +640,15 @@ def main() -> None:
 
     gold_map = reference.load_gold_map(gold_file)
     chunk_catalog = reference.load_chunk_catalog(gold_chunks_file)
+    if not chunk_catalog.get("chunks"):
+        corpus_pkl = input_dir / "index_store" / "corpus.pkl"
+        if corpus_pkl.exists():
+            chunk_catalog = _build_chunk_catalog_from_corpus_pickle(corpus_pkl)
+            print(
+                f"[INFO] Loaded fallback chunk catalog from corpus pickle: {corpus_pkl} "
+                f"(chunks={len(chunk_catalog.get('chunks', []))})",
+                flush=True,
+            )
     doc_file = resolve_existing_path(project_root, input_dir, manifest.get("doc_file") if manifest else None) or Path("[unknown]")
 
     logs_dir = input_dir / "logs"
@@ -629,10 +684,10 @@ def main() -> None:
             question_level_rows.append(row.copy())
         interaction_summary_rows.append(summary)
 
-        summary["hit_at_1_rate"] = round(summary.get("hit_at_1_count", 0) / max(int(summary.get("questions", 0)), 1), 4)
-        summary["hit_at_5_rate"] = round(summary.get("hit_at_5_count", 0) / max(int(summary.get("questions", 0)), 1), 4)
-        summary["hit_at_8_rate"] = round(summary.get("hit_at_8_count", 0) / max(int(summary.get("questions", 0)), 1), 4)
-        summary["hit_at_dynamic_k_rate"] = round(summary.get("hit_at_dynamic_k_count", 0) / max(int(summary.get("questions", 0)), 1), 4)
+        summary["hit_at_1_rate"] = float(summary.get("avg_hit_at_1", 0.0))
+        summary["hit_at_5_rate"] = float(summary.get("avg_hit_at_5", 0.0))
+        summary["hit_at_8_rate"] = float(summary.get("avg_hit_at_8", 0.0))
+        summary["hit_at_dynamic_k_rate"] = float(summary.get("avg_hit_at_dynamic_k", 0.0))
 
         run_payloads.append(
             {
@@ -738,13 +793,13 @@ def main() -> None:
             "avg_rerank_top1_score",
             "avg_rerank_margin_top1_top2",
             "unique_rerank_top1_chunks",
-            "hit_at_1_count",
+            "avg_hit_at_1",
             "hit_at_1_rate",
-            "hit_at_5_count",
+            "avg_hit_at_5",
             "hit_at_5_rate",
-            "hit_at_8_count",
+            "avg_hit_at_8",
             "hit_at_8_rate",
-            "hit_at_dynamic_k_count",
+            "avg_hit_at_dynamic_k",
             "hit_at_dynamic_k_rate",
             "avg_dynamic_k",
         ],
@@ -769,19 +824,23 @@ def main() -> None:
         top_k=top_k,
     )
 
+    valid_summaries = [
+        r for r in interaction_summary_rows
+        if int(r.get("exit_code", 1)) == 0 and int(r.get("retrieval_blocks", 0)) > 0
+    ]
     plot_files: list[str] = []
     if not args.no_plots:
-        plot_files = reference.build_line_plots(
+        plots_dir = output_dir / "plots"
+        if plots_dir.exists():
+            shutil.rmtree(plots_dir)
+        plot_files = reference.build_qe_ratio_plots(
             run_dir=output_dir,
-            run_summaries=interaction_summary_rows,
-            question_rows=question_level_rows,
+            run_summaries=valid_summaries,
             dynamic_topk_ratio=dynamic_topk_ratios[0],
-            dynamic_topk_ratios=dynamic_topk_ratios,
         )
         plot_files.extend(
-            rebuild_dynamic_k_multi_ratio_plot(
+            reference.build_dynamic_ratio_plots(
                 run_dir=output_dir,
-                run_summaries=interaction_summary_rows,
                 question_rows=question_level_rows,
                 dynamic_topk_ratios=dynamic_topk_ratios,
             )

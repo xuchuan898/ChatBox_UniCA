@@ -753,14 +753,9 @@ def build_markdown_summary(
             "",
             "### What each figure file shows",
             "",
-            "- `plots/metrics_vs_bm25_ratio.png`: X is BM25 ratio sweep (`w_bm25`), with other variables fixed.",
-            "- `plots/metrics_vs_translation_ratio.png`: X is retrieval translation ratio sweep.",
-            "- `plots/metrics_vs_rerank_alpha.png`: X is rerank fusion alpha sweep.",
-            "- `plots/avg_dynamic_k_vs_bm25_ratio.png`: X is BM25 ratio; Y is average dynamic-K.",
-            "- `plots/avg_dynamic_k_vs_translation_ratio.png`: X is translation ratio; Y is average dynamic-K.",
-            "- `plots/avg_dynamic_k_vs_rerank_alpha.png`: X is rerank alpha; Y is average dynamic-K.",
-            "- `plots/metrics_vs_rerank_candidates_*.png`: X is number of candidates sent to rerank; Y is metric rate.",
-            "- `plots/avg_dynamic_k_vs_rerank_candidates.png`: X is number of candidates sent to rerank; Y is average dynamic-K.",
+            "- `plots/qe_ratio_metrics_by_rerank_candidates.png`: 3 subplots (RC=10/20/30), X is query-expansion ratio, Y is Hit@1/5/8.",
+            f"- `plots/qe_ratio_dynamick_r{dynamic_topk_ratios[0]:.2f}_by_rerank_candidates.png`: 3 subplots (RC=10/20/30), left Y is Hit@DynamicK, right Y is Avg Dynamic-K.",
+            "- `plots/qe_ratio_heatmap_hit5.png`: heatmap of Hit@5 by (rerank_candidates, query-expansion ratio).",
             "",
             "## Artifacts",
             "",
@@ -768,11 +763,237 @@ def build_markdown_summary(
             "- `interaction_summary.csv`: interaction-level aggregate metrics.",
             "- `question_level.csv`: per-question top retrieval signals.",
             "- `details.md`: per-question/per-run variants and rerank Top-k tables.",
-            "- `plots/`: line charts for bm25_ratio / translation_ratio / rerank_alpha sweeps.",
+            "- `plots/`: focused charts for query-expansion-ratio sweep only.",
             "",
         ]
     )
     (run_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def build_qe_ratio_plots(
+    run_dir: Path,
+    run_summaries: list[dict],
+    dynamic_topk_ratio: float,
+) -> list[str]:
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return []
+
+    valid_runs = [
+        r for r in run_summaries
+        if int(r.get("exit_code", 1)) == 0 and int(r.get("retrieval_blocks", 0)) > 0
+    ]
+    if not valid_runs:
+        return []
+
+    plots_dir = run_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    generated: list[str] = []
+
+    by_rc: dict[int, list[dict]] = {}
+    for row in valid_runs:
+        rc = int(row.get("rerank_candidates", 0))
+        by_rc.setdefault(rc, []).append(row)
+    rcs = sorted(by_rc.keys())
+    if not rcs:
+        return []
+
+    # Figure 1: Hit@1/5/8 vs QE ratio for each rerank_candidates
+    fig, axes = plt.subplots(1, len(rcs), figsize=(5 * len(rcs), 4.2), sharey=True)
+    if len(rcs) == 1:
+        axes = [axes]
+    for i, rc in enumerate(rcs):
+        rows = sorted(by_rc[rc], key=lambda x: float(x.get("translation_ratio", 0.0)))
+        xs = [float(r.get("translation_ratio", 0.0)) for r in rows]
+        h1 = [float(r.get("avg_hit_at_1", 0.0)) for r in rows]
+        h5 = [float(r.get("avg_hit_at_5", 0.0)) for r in rows]
+        h8 = [float(r.get("avg_hit_at_8", 0.0)) for r in rows]
+        ax = axes[i]
+        ax.plot(xs, h1, marker="o", linewidth=1.8, label="Hit@1")
+        ax.plot(xs, h5, marker="s", linewidth=1.8, label="Hit@5")
+        ax.plot(xs, h8, marker="^", linewidth=1.8, label="Hit@8")
+        ax.set_title(f"RC={rc}")
+        ax.set_xlabel("Query Expansion Ratio")
+        ax.set_ylim(0.6, 1.0)
+        ax.grid(True, alpha=0.3)
+        if i == 0:
+            ax.set_ylabel("Coverage")
+            ax.legend(loc="lower right", fontsize=8)
+    fig.suptitle("QE Ratio vs Hit@K by Rerank Candidates", fontsize=12)
+    fig.tight_layout()
+    out1 = plots_dir / "qe_ratio_metrics_by_rerank_candidates.png"
+    fig.savefig(out1, dpi=150)
+    plt.close(fig)
+    generated.append(str(out1))
+
+    # Figure 2: Hit@DynamicK + Avg Dynamic-K (dual axis)
+    fig, axes = plt.subplots(1, len(rcs), figsize=(5 * len(rcs), 4.2), sharey=True)
+    if len(rcs) == 1:
+        axes = [axes]
+    for i, rc in enumerate(rcs):
+        rows = sorted(by_rc[rc], key=lambda x: float(x.get("translation_ratio", 0.0)))
+        xs = [float(r.get("translation_ratio", 0.0)) for r in rows]
+        hit_dyn = [float(r.get("avg_hit_at_dynamic_k", 0.0)) for r in rows]
+        avg_k = [float(r.get("avg_dynamic_k", 0.0)) for r in rows]
+        ax = axes[i]
+        ax2 = ax.twinx()
+        l1 = ax.plot(xs, hit_dyn, marker="o", linewidth=1.8, color="#1f77b4", label="Hit@DynamicK")[0]
+        l2 = ax2.plot(xs, avg_k, marker="d", linewidth=1.8, color="#ff7f0e", label="Avg Dynamic-K")[0]
+        ax.set_title(f"RC={rc}")
+        ax.set_xlabel("Query Expansion Ratio")
+        ax.set_ylim(0.6, 1.0)
+        ax.grid(True, alpha=0.3)
+        if i == 0:
+            ax.set_ylabel("Hit@DynamicK")
+        ax2.set_ylabel("Avg Dynamic-K")
+        ax.legend([l1, l2], [l1.get_label(), l2.get_label()], loc="lower right", fontsize=8)
+    fig.suptitle(f"QE Ratio vs Dynamic-K Metrics (r={dynamic_topk_ratio:.2f})", fontsize=12)
+    fig.tight_layout()
+    out2 = plots_dir / f"qe_ratio_dynamick_r{dynamic_topk_ratio:.2f}_by_rerank_candidates.png"
+    fig.savefig(out2, dpi=150)
+    plt.close(fig)
+    generated.append(str(out2))
+
+    # Figure 3: Heatmap for Hit@5
+    try:
+        import numpy as np
+        ratios = sorted({float(r.get("translation_ratio", 0.0)) for r in valid_runs})
+        matrix = np.full((len(rcs), len(ratios)), np.nan)
+        for i, rc in enumerate(rcs):
+            row_map = {float(r.get("translation_ratio", 0.0)): float(r.get("avg_hit_at_5", 0.0)) for r in by_rc[rc]}
+            for j, ratio in enumerate(ratios):
+                matrix[i, j] = row_map.get(ratio, np.nan)
+        fig, ax = plt.subplots(figsize=(max(7, len(ratios) * 0.6), 3.5))
+        im = ax.imshow(matrix, aspect="auto", cmap="viridis", vmin=0.6, vmax=1.0)
+        ax.set_xticks(range(len(ratios)))
+        ax.set_xticklabels([f"{v:.1f}" for v in ratios], rotation=45, ha="right")
+        ax.set_yticks(range(len(rcs)))
+        ax.set_yticklabels([str(v) for v in rcs])
+        ax.set_xlabel("Query Expansion Ratio")
+        ax.set_ylabel("Rerank Candidates")
+        ax.set_title("Hit@5 Heatmap")
+        fig.colorbar(im, ax=ax, label="Hit@5")
+        fig.tight_layout()
+        out3 = plots_dir / "qe_ratio_heatmap_hit5.png"
+        fig.savefig(out3, dpi=150)
+        plt.close(fig)
+        generated.append(str(out3))
+    except Exception:
+        pass
+
+    return generated
+
+
+def build_dynamic_ratio_plots(
+    run_dir: Path,
+    question_rows: list[dict],
+    dynamic_topk_ratios: list[float],
+) -> list[str]:
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return []
+    if not question_rows or not dynamic_topk_ratios:
+        return []
+
+    def _parse_dynamic_map(raw: object) -> dict:
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
+        return {}
+
+    ratio_x = list(dynamic_topk_ratios)
+    ratio_pos = list(range(len(ratio_x)))
+    hit_rates: list[float] = []
+    avg_ks: list[float] = []
+    row_count = len(question_rows)
+    for ratio in ratio_x:
+        key = f"{ratio:.4f}"
+        hit_sum = 0.0
+        k_sum = 0.0
+        for row in question_rows:
+            dyn = _parse_dynamic_map(row.get("dynamic_by_ratio", {})).get(key, {})
+            if isinstance(dyn, dict):
+                hit_sum += float(dyn.get("hit", 0.0))
+                k_sum += float(dyn.get("k", 0.0))
+        hit_rates.append(hit_sum / max(row_count, 1))
+        avg_ks.append(k_sum / max(row_count, 1))
+
+    plots_dir = run_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    generated: list[str] = []
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    line = ax.plot(ratio_pos, hit_rates, marker="o", linewidth=2, label="Dynamic-K Accuracy")[0]
+    for x_val, y_val, k_val, r_val in zip(ratio_pos, hit_rates, avg_ks, ratio_x):
+        ax.annotate(
+            f"r={r_val:.2f}\nK={k_val:.2f}",
+            (x_val, y_val),
+            textcoords="offset points",
+            xytext=(0, 8),
+            ha="center",
+            fontsize=8,
+            color=line.get_color(),
+        )
+    ax.set_title("Dynamic Ratio vs Accuracy")
+    ax.set_xlabel("Dynamic ratio r (non-linear spaced)")
+    ax.set_ylabel("Accuracy")
+    ax.set_ylim(0.6, 1.0)
+    ax.set_xticks(ratio_pos)
+    ax.set_xticklabels([f"{r:.2f}" for r in ratio_x], rotation=45, ha="right")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize=8)
+    out1 = plots_dir / "dynamic_ratio_vs_accuracy.png"
+    fig.tight_layout()
+    fig.savefig(out1, dpi=150)
+    plt.close(fig)
+    generated.append(str(out1))
+
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+    line = ax.plot(
+        ratio_pos,
+        hit_rates,
+        marker="o",
+        linewidth=2,
+        color="#1f77b4",
+        label="Dynamic-K Accuracy",
+    )[0]
+    for x_val, y_val, k_val, r_val in zip(ratio_pos, hit_rates, avg_ks, ratio_x):
+        ax.annotate(
+            f"r={r_val:.2f}\nK={k_val:.2f}",
+            (x_val, y_val),
+            textcoords="offset points",
+            xytext=(0, 8),
+            ha="center",
+            fontsize=8,
+            color=line.get_color(),
+        )
+    for k in range(1, 9):
+        key = f"hit_at_{k}"
+        if not any(key in row for row in question_rows):
+            continue
+        acc = sum(float(row.get(key, 0.0)) for row in question_rows) / max(row_count, 1)
+        ax.axhline(acc, linestyle="--", linewidth=1.1, alpha=0.75, label=f"Top-{k}={acc:.2f}")
+    ax.set_title("Dynamic Ratio vs Accuracy with Fixed Top-K Baselines")
+    ax.set_xlabel("Dynamic ratio r (non-linear spaced)")
+    ax.set_ylabel("Accuracy")
+    ax.set_ylim(0.6, 1.0)
+    ax.set_xticks(ratio_pos)
+    ax.set_xticklabels([f"{r:.2f}" for r in ratio_x], rotation=45, ha="right")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize=8, ncol=2)
+    out2 = plots_dir / "dynamic_ratio_vs_accuracy_with_topk_baselines.png"
+    fig.tight_layout()
+    fig.savefig(out2, dpi=150)
+    plt.close(fig)
+    generated.append(str(out2))
+    return generated
 
 
 def build_markdown_details(
@@ -1365,6 +1586,8 @@ def build_line_plots(
     # Global dynamic-ratio curve aggregated over all (run, question) rows.
     if question_rows and dynamic_topk_ratios:
         ratio_x = list(dynamic_topk_ratios)
+        # Non-linear display spacing: treat each ratio as an ordered level to avoid crowding near 0~0.1.
+        ratio_pos = list(range(len(ratio_x)))
         hit_rates = []
         avg_ks = []
         row_count = len(question_rows)
@@ -1381,10 +1604,10 @@ def build_line_plots(
             avg_ks.append(k_sum / max(row_count, 1))
 
         fig, ax = plt.subplots(figsize=(9, 5))
-        line = ax.plot(ratio_x, hit_rates, marker="o", linewidth=2, label="Dynamic-K Accuracy")[0]
-        for x_val, y_val, k_val in zip(ratio_x, hit_rates, avg_ks):
+        line = ax.plot(ratio_pos, hit_rates, marker="o", linewidth=2, label="Dynamic-K Accuracy")[0]
+        for x_val, y_val, k_val, r_val in zip(ratio_pos, hit_rates, avg_ks, ratio_x):
             ax.annotate(
-                f"r={x_val:.2f}\nK={k_val:.2f}",
+                f"r={r_val:.2f}\nK={k_val:.2f}",
                 (x_val, y_val),
                 textcoords="offset points",
                 xytext=(0, 8),
@@ -1393,10 +1616,11 @@ def build_line_plots(
                 color=line.get_color(),
             )
         ax.set_title("Dynamic Ratio vs Accuracy")
-        ax.set_xlabel("Dynamic ratio r")
+        ax.set_xlabel("Dynamic ratio r (non-linear spaced)")
         ax.set_ylabel("Accuracy")
         ax.set_ylim(0.6, 1.0)
-        ax.set_xticks(ratio_x)
+        ax.set_xticks(ratio_pos)
+        ax.set_xticklabels([f"{r:.2f}" for r in ratio_x], rotation=45, ha="right")
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=8)
         out = plots_dir / "dynamic_ratio_vs_accuracy.png"
@@ -1418,16 +1642,16 @@ def build_line_plots(
             "#17becf",
         ]
         line = ax.plot(
-            ratio_x,
+            ratio_pos,
             hit_rates,
             marker="o",
             linewidth=2,
             color=dynamic_color,
             label="Dynamic-K Accuracy",
         )[0]
-        for x_val, y_val, k_val in zip(ratio_x, hit_rates, avg_ks):
+        for x_val, y_val, k_val, r_val in zip(ratio_pos, hit_rates, avg_ks, ratio_x):
             ax.annotate(
-                f"r={x_val:.2f}\nK={k_val:.2f}",
+                f"r={r_val:.2f}\nK={k_val:.2f}",
                 (x_val, y_val),
                 textcoords="offset points",
                 xytext=(0, 8),
@@ -1451,10 +1675,11 @@ def build_line_plots(
             )
 
         ax.set_title("Dynamic Ratio vs Accuracy with Fixed Top-K Baselines")
-        ax.set_xlabel("Dynamic ratio r")
+        ax.set_xlabel("Dynamic ratio r (non-linear spaced)")
         ax.set_ylabel("Accuracy")
         ax.set_ylim(0.6, 1.0)
-        ax.set_xticks(ratio_x)
+        ax.set_xticks(ratio_pos)
+        ax.set_xticklabels([f"{r:.2f}" for r in ratio_x], rotation=45, ha="right")
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=8, ncol=2)
         out = plots_dir / "dynamic_ratio_vs_accuracy_with_topk_baselines.png"
@@ -1886,12 +2111,17 @@ def main() -> None:
         dynamic_topk_ratios=dynamic_topk_ratios,
         top_k=args.top_k,
     )
-    plot_files = build_line_plots(
+    plot_files = build_qe_ratio_plots(
         run_dir=run_dir,
         run_summaries=interaction_summary_rows,
-        question_rows=question_level_rows,
         dynamic_topk_ratio=dynamic_topk_ratio,
-        dynamic_topk_ratios=dynamic_topk_ratios,
+    )
+    plot_files.extend(
+        build_dynamic_ratio_plots(
+            run_dir=run_dir,
+            question_rows=question_level_rows,
+            dynamic_topk_ratios=dynamic_topk_ratios,
+        )
     )
 
     print("[INFO] Interaction ablation finished.", flush=True)
