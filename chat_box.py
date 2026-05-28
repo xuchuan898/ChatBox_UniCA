@@ -54,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cache-ttl", type=int, default=None)
     parser.add_argument("--enable-memory", type=str, default=None)
     parser.add_argument("--memory-rounds", type=int, default=None)
+    parser.add_argument("--enable-long-term-memory", type=str, default=None)
     return parser.parse_args()
 
 
@@ -214,6 +215,7 @@ def main() -> None:
         "cache.ttl": args.cache_ttl,
         "memory.enabled": _parse_bool(args.enable_memory),
         "memory.short_term_rounds": args.memory_rounds,
+        "memory.long_term_enabled": _parse_bool(args.enable_long_term_memory),
     }
     config = apply_cli_overrides(config, overrides)
 
@@ -281,10 +283,15 @@ def main() -> None:
         )
     memory = None
     if config["memory"]["enabled"]:
-        memory = ConversationMemory(rounds=int(config["memory"]["short_term_rounds"]), model_name=config["generation"]["model_name"])
+        memory = ConversationMemory(
+            rounds=int(config["memory"]["short_term_rounds"]),
+            model_name=config["generation"]["model_name"],
+            long_term_enabled=bool(config["memory"].get("long_term_enabled", False)),
+        )
     if args.debug:
         print(
-            f"[DEBUG][BOOT] memory enabled={bool(memory)} rounds={config['memory']['short_term_rounds']}"
+            f"[DEBUG][BOOT] memory enabled={bool(memory)} rounds={config['memory']['short_term_rounds']} "
+            f"long_term_enabled=false"
         )
 
     def run_one(question: str) -> str:
@@ -292,7 +299,7 @@ def main() -> None:
         mem_ctx = ""
         t_mem = time.perf_counter()
         if memory:
-            mem_ctx = "\n".join(filter(None, [memory.build_short_prompt(), memory.build_long_prompt()]))
+            mem_ctx = memory.build_short_prompt()
         mem_sec = time.perf_counter() - t_mem
         t_cache = time.perf_counter()
         if cache:

@@ -28,7 +28,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "target_lang_for_translation": "auto",
     },
     "cache": {"enabled": True, "threshold": 0.92, "ttl": 86400},
-    "memory": {"enabled": True, "short_term_rounds": 5},
+    "memory": {"enabled": True, "short_term_rounds": 5, "long_term_enabled": False},
     "generation": {"model_name": "gemma3:4b", "temperature": 0.0, "num_predict": 256},
 }
 

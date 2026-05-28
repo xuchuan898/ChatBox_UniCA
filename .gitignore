@@ -21,7 +21,11 @@
 
 !docs/chroma/master.md
 !README.md
+!questions/
+!questions/test_memory_short_term.json
 !experiments/
+!experiments/run_memory_test.py
 !experiments/results/
+!experiments/results/memory_test_report.md
 !experiments/results/retrieval_weight_ablation_20260428_222229/
 !experiments/results/retrieval_weight_ablation_20260428_222229/**

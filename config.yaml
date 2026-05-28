@@ -19,13 +19,14 @@ query_expansion:
   target_lang_for_translation: "auto"
 
 cache:
-  enabled: true
+  enabled: false
   threshold: 0.92
   ttl: 86400
 
 memory:
   enabled: true
   short_term_rounds: 5
+  long_term_enabled: false
 
 generation:
   model_name: "gemma3:4b"

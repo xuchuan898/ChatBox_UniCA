@@ -69,7 +69,7 @@ class HybridRetriever:
         by_id: dict[int, Document] = {}
         for docs, weight in ranked_lists:
             for rank, doc in enumerate(docs, 1):
-                doc_id = int(doc.metadata.get("chunk_id", hash(doc.page_content)))
+                doc_id = str(doc.metadata.get("chunk_id") or hash(doc.page_content))
                 scores[doc_id] += weight / (k + rank)
                 by_id.setdefault(doc_id, doc)
         return sorted(((by_id[key], val) for key, val in scores.items()), key=lambda x: x[1], reverse=True)

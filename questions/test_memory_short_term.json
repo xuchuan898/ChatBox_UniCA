@@ -1,0 +1,325 @@
+{
+  "meta": {
+    "description": "Short-term memory test for ChatBox_UniCA",
+    "source_doc": "docs/chroma/master.md",
+    "memory_rounds": 5,
+    "created_date": "2026-05-28"
+  },
+  "dimensions": [
+    {
+      "dimension": "pronoun_resolution",
+      "description": "Tests whether the model resolves pronouns and deictic references such as it, they, this course, and that lecturer.",
+      "conversations": [
+        {
+          "id": "pr_01",
+          "turns": [
+            {"role": "user", "text": "What is the ECTS value for AI Game Programming in S1?"},
+            {"role": "user", "text": "Who is the lecturer for it?"},
+            {"role": "user", "text": "What project do students need to develop in this course?"}
+          ],
+          "expected_behaviors": {
+            "turn_2_understands_it_refers_to_ai_game_programming": true,
+            "turn_3_maintains_same_topic": true
+          },
+          "checks": [
+            {"name": "turn_2_understands_it_refers_to_ai_game_programming", "turn": 2, "expected": true, "must_include_any": ["Regin"]},
+            {"name": "turn_3_maintains_same_topic", "turn": 3, "expected": true, "must_include_any": ["simulate a human player", "human player", "groups of two", "competition"]}
+          ],
+          "tags": ["core", "basic"]
+        },
+        {
+          "id": "pr_02",
+          "turns": [
+            {"role": "user", "text": "Tell me the lecturer and ECTS for Neural Language Processing in S1."},
+            {"role": "user", "text": "What does it say about Transformers?"},
+            {"role": "user", "text": "Does this course also mention embeddings?"}
+          ],
+          "expected_behaviors": {
+            "turn_2_resolves_it_to_neural_language_processing": true,
+            "turn_3_resolves_this_course_to_neural_language_processing": true
+          },
+          "checks": [
+            {"name": "turn_2_resolves_it_to_neural_language_processing", "turn": 2, "expected": true, "must_include_any": ["Transformers", "Large Language Models", "LLMs", "attention"]},
+            {"name": "turn_3_resolves_this_course_to_neural_language_processing", "turn": 3, "expected": true, "must_include_any": ["embeddings", "latent spaces", "numerical forms"]}
+          ],
+          "tags": ["core", "basic"]
+        },
+        {
+          "id": "pr_03",
+          "turns": [
+            {"role": "user", "text": "Who teaches Programming Paradigms in S2?"},
+            {"role": "user", "text": "What does she cover in that course?"},
+            {"role": "user", "text": "How does it compare different paradigms?"}
+          ],
+          "expected_behaviors": {
+            "turn_2_resolves_she_to_mme_de_maria": true,
+            "turn_3_keeps_programming_paradigms_topic": true
+          },
+          "checks": [
+            {"name": "turn_2_resolves_she_to_mme_de_maria", "turn": 2, "expected": true, "must_include_any": ["imperative", "functional", "object-oriented", "classical paradigms"]},
+            {"name": "turn_3_keeps_programming_paradigms_topic", "turn": 3, "expected": true, "must_include_any": ["software design", "reasoning", "style of programming", "impact"]}
+          ],
+          "tags": ["core", "basic"]
+        }
+      ]
+    },
+    {
+      "dimension": "ellipsis",
+      "description": "Tests whether the model recovers omitted intent in short follow-ups such as what about, and, and same question.",
+      "conversations": [
+        {
+          "id": "el_01",
+          "turns": [
+            {"role": "user", "text": "What are the compulsory courses in S1?"},
+            {"role": "user", "text": "What about S2?"},
+            {"role": "user", "text": "And their total ECTS?"}
+          ],
+          "expected_behaviors": {
+            "turn_2_infers_compulsory_courses_in_s2": true,
+            "turn_3_infers_total_ects_of_s2_compulsory": true
+          },
+          "checks": [
+            {"name": "turn_2_infers_compulsory_courses_in_s2", "turn": 2, "expected": true, "must_include_any": ["Natural Language Processing", "Combinatorial Optimization", "Logic for AI", "Introduction to Multiagent Systems"]},
+            {"name": "turn_3_infers_total_ects_of_s2_compulsory", "turn": 3, "expected": true, "must_include_any": ["15 ECTS", "15"]}
+          ],
+          "tags": ["core", "basic"]
+        },
+        {
+          "id": "el_02",
+          "turns": [
+            {"role": "user", "text": "Give me the lecturer and ECTS for the Web course."},
+            {"role": "user", "text": "And for Distributed Computing and Learning?"},
+            {"role": "user", "text": "Same question for Programming Challenge."}
+          ],
+          "expected_behaviors": {
+            "turn_2_infers_lecturer_and_ects_for_distributed_computing": true,
+            "turn_3_infers_lecturer_and_ects_for_programming_challenge": true
+          },
+          "checks": [
+            {"name": "turn_2_infers_lecturer_and_ects_for_distributed_computing", "turn": 2, "expected": true, "must_include_any": ["XU", "3 ECTS"]},
+            {"name": "turn_3_infers_lecturer_and_ects_for_programming_challenge", "turn": 3, "expected": true, "must_include_any": ["Malapert", "3 ECTS"]}
+          ],
+          "tags": ["core", "basic"]
+        },
+        {
+          "id": "el_03",
+          "turns": [
+            {"role": "user", "text": "What are the elective selection rules in S1?"},
+            {"role": "user", "text": "And in S2?"},
+            {"role": "user", "text": "How many best grades count there?"}
+          ],
+          "expected_behaviors": {
+            "turn_2_infers_s2_elective_selection_rules": true,
+            "turn_3_resolves_there_to_s2": true
+          },
+          "checks": [
+            {"name": "turn_2_infers_s2_elective_selection_rules", "turn": 2, "expected": true, "must_include_any": ["minimum 3", "maximum 5", "DS4H"]},
+            {"name": "turn_3_resolves_there_to_s2", "turn": 3, "expected": true, "must_include_any": ["3 best", "three best", "3 meilleures"]}
+          ],
+          "tags": ["core", "basic"]
+        }
+      ]
+    },
+    {
+      "dimension": "follow_up",
+      "description": "Tests whether the model keeps a coherent topic through several follow-up questions.",
+      "conversations": [
+        {
+          "id": "fu_01",
+          "turns": [
+            {"role": "user", "text": "Tell me about the Logic for AI course in S2."},
+            {"role": "user", "text": "What logical methods does it cover?"},
+            {"role": "user", "text": "What's the difference between non-monotonic logic and fuzzy logic in that context?"},
+            {"role": "user", "text": "How do these methods relate to uncertainty or imprecision in AI systems?"}
+          ],
+          "expected_behaviors": {
+            "turn_2_stays_on_logic_for_ai": true,
+            "turn_3_compares_within_same_course": true,
+            "turn_4_applies_course_content_to_broader_context": true
+          },
+          "checks": [
+            {"name": "turn_2_stays_on_logic_for_ai", "turn": 2, "expected": true, "must_include_any": ["Non-Monotonic", "Fuzzy Logic", "Possibility Theory", "Belief Revision"]},
+            {"name": "turn_3_compares_within_same_course", "turn": 3, "expected": true, "must_include_any": ["non-monotonic", "fuzzy"]},
+            {"name": "turn_4_applies_course_content_to_broader_context", "turn": 4, "expected": true, "must_include_any": ["uncertainty", "imprecision", "incompleteness"]}
+          ],
+          "tags": ["core", "advanced"]
+        },
+        {
+          "id": "fu_02",
+          "turns": [
+            {"role": "user", "text": "Explain the Model Checking for AI course."},
+            {"role": "user", "text": "Which temporal logics are named?"},
+            {"role": "user", "text": "What modeling structure is mentioned?"},
+            {"role": "user", "text": "Why is this course relevant to verifying AI-related systems?"}
+          ],
+          "expected_behaviors": {
+            "turn_2_keeps_model_checking_topic": true,
+            "turn_3_keeps_model_checking_topic": true,
+            "turn_4_connects_to_verification": true
+          },
+          "checks": [
+            {"name": "turn_2_keeps_model_checking_topic", "turn": 2, "expected": true, "must_include_any": ["CTL", "LTL", "temporal logics"]},
+            {"name": "turn_3_keeps_model_checking_topic", "turn": 3, "expected": true, "must_include_any": ["Kripke"]},
+            {"name": "turn_4_connects_to_verification", "turn": 4, "expected": true, "must_include_any": ["verify", "checking", "specification", "formal methods"]}
+          ],
+          "tags": ["core", "advanced"]
+        },
+        {
+          "id": "fu_03",
+          "turns": [
+            {"role": "user", "text": "Tell me about Distributed Computing and Learning."},
+            {"role": "user", "text": "What parallel framework does it focus on?"},
+            {"role": "user", "text": "What real-world scenarios are mentioned?"},
+            {"role": "user", "text": "What lab environment do students use?"}
+          ],
+          "expected_behaviors": {
+            "turn_2_stays_on_distributed_computing": true,
+            "turn_3_keeps_application_context": true,
+            "turn_4_keeps_lab_context": true
+          },
+          "checks": [
+            {"name": "turn_2_stays_on_distributed_computing", "turn": 2, "expected": true, "must_include_any": ["distributed-memory", "memory space"]},
+            {"name": "turn_3_keeps_application_context", "turn": 3, "expected": true, "must_include_any": ["cluster", "sensor network", "IoT"]},
+            {"name": "turn_4_keeps_lab_context", "turn": 4, "expected": true, "must_include_any": ["Grid5000", "PyTorch", "GPU-equipped"]}
+          ],
+          "tags": ["core", "advanced"]
+        }
+      ]
+    },
+    {
+      "dimension": "correction",
+      "description": "Tests whether the model follows user corrections and topic reversals introduced by no, I meant, or actually.",
+      "conversations": [
+        {
+          "id": "co_01",
+          "turns": [
+            {"role": "user", "text": "How many compulsory courses are there in S1?"},
+            {"role": "user", "text": "No, I meant the elective courses in S1."},
+            {"role": "user", "text": "How many DS4H minors can be included there?"},
+            {"role": "user", "text": "Actually back to compulsory courses, what's their total ECTS?"}
+          ],
+          "expected_behaviors": {
+            "turn_2_corrects_from_compulsory_to_elective": true,
+            "turn_3_keeps_s1_elective_rule": true,
+            "turn_4_switches_back_to_compulsory": true
+          },
+          "checks": [
+            {"name": "turn_2_corrects_from_compulsory_to_elective", "turn": 2, "expected": true, "must_include_any": ["minimum 2", "maximum 4", "2 best", "Web"]},
+            {"name": "turn_3_keeps_s1_elective_rule", "turn": 3, "expected": true, "must_include_any": ["maximum 1", "one", "DS4H"]},
+            {"name": "turn_4_switches_back_to_compulsory", "turn": 4, "expected": true, "must_include_any": ["18 ECTS", "18"]}
+          ],
+          "tags": ["core", "advanced"]
+        },
+        {
+          "id": "co_02",
+          "turns": [
+            {"role": "user", "text": "Tell me about Natural Language Processing in S2."},
+            {"role": "user", "text": "No, I meant Neural Language Processing in S1."},
+            {"role": "user", "text": "Who teaches that corrected course?"},
+            {"role": "user", "text": "Actually compare it with the S2 NLP course."}
+          ],
+          "expected_behaviors": {
+            "turn_2_corrects_s2_nlp_to_s1_neural_language_processing": true,
+            "turn_3_resolves_corrected_course": true,
+            "turn_4_compares_corrected_course_with_original_course": true
+          },
+          "checks": [
+            {"name": "turn_2_corrects_s2_nlp_to_s1_neural_language_processing", "turn": 2, "expected": true, "must_include_any": ["Transformers", "embeddings", "LLMs", "Mme. Ollagnier"]},
+            {"name": "turn_3_resolves_corrected_course", "turn": 3, "expected": true, "must_include_any": ["Ollagnier"]},
+            {"name": "turn_4_compares_corrected_course_with_original_course", "turn": 4, "expected": true, "must_include_any": ["Cabrio", "Ollagnier", "sentiment analysis", "Transformers"]}
+          ],
+          "tags": ["core", "advanced"]
+        }
+      ]
+    },
+    {
+      "dimension": "cross_reference",
+      "description": "Tests whether the model can compare multiple courses mentioned in different parts of the same conversation.",
+      "conversations": [
+        {
+          "id": "cr_01",
+          "turns": [
+            {"role": "user", "text": "What does the Model Checking for AI course cover?"},
+            {"role": "user", "text": "What about the UE Projet options?"},
+            {"role": "user", "text": "Back to courses, what's in Neural Language Processing?"},
+            {"role": "user", "text": "Compare Model Checking for AI and Neural Language Processing: which one is more theoretical?"}
+          ],
+          "expected_behaviors": {
+            "turn_2_switches_topic_to_project": true,
+            "turn_3_switches_back_to_courses": true,
+            "turn_4_remembers_two_courses_mentioned_earlier": true,
+            "can_cross_reference_across_conversation_arcs": true
+          },
+          "checks": [
+            {"name": "turn_2_switches_topic_to_project", "turn": 2, "expected": true, "must_include_any": ["Projet DS4H", "Travail d'Etudes et de Recherche", "TER"]},
+            {"name": "turn_3_switches_back_to_courses", "turn": 3, "expected": true, "must_include_any": ["embeddings", "Transformers", "LLMs"]},
+            {"name": "turn_4_remembers_two_courses_mentioned_earlier", "turn": 4, "expected": true, "must_include_any": ["Model Checking", "Neural Language Processing"]},
+            {"name": "can_cross_reference_across_conversation_arcs", "turn": 4, "expected": true, "must_include_any": ["formal methods", "temporal logics", "Kripke", "theoretical"]}
+          ],
+          "tags": ["core", "stress_test"]
+        },
+        {
+          "id": "cr_02",
+          "turns": [
+            {"role": "user", "text": "Describe Programming Challenge."},
+            {"role": "user", "text": "Now describe Problem Solving."},
+            {"role": "user", "text": "Before comparing them, what is the ECTS value of each?"},
+            {"role": "user", "text": "Which of the two is more focused on real-life optimization problems?"}
+          ],
+          "expected_behaviors": {
+            "turn_3_remembers_both_courses_for_ects": true,
+            "turn_4_compares_both_courses": true
+          },
+          "checks": [
+            {"name": "turn_3_remembers_both_courses_for_ects", "turn": 3, "expected": true, "must_include_any": ["3 ECTS"]},
+            {"name": "turn_4_compares_both_courses", "turn": 4, "expected": true, "must_include_any": ["Problem Solving", "real-life", "gate allocation", "constrained pathfinding"]}
+          ],
+          "tags": ["core", "stress_test"]
+        }
+      ]
+    },
+    {
+      "dimension": "boundary_overflow",
+      "description": "Tests the five-turn short-term memory boundary and whether early dialogue facts fall out after overflow.",
+      "conversations": [
+        {
+          "id": "bo_01",
+          "turns": [
+            {"role": "user", "text": "Who is the M1 program coordinator?"},
+            {"role": "user", "text": "What are the prerequisites for the AI track?"},
+            {"role": "user", "text": "Tell me about the Software Engineering course."},
+            {"role": "user", "text": "What is the Web course about?"},
+            {"role": "user", "text": "What is the Distributed Computing and Learning course about?"},
+            {"role": "user", "text": "Who did we say is the M1 program coordinator?"}
+          ],
+          "expected_behaviors": {
+            "still_remembers_m1_coordinator": false,
+            "explanation": "On turn 6, the first user turn is outside the five-turn deque. A pure short-term memory answer should not rely on the first turn."
+          },
+          "checks": [
+            {"name": "still_remembers_m1_coordinator", "turn": 6, "expected": false, "must_include_any": ["Chuan Xu", "Chuan.XU"]}
+          ],
+          "tags": ["boundary", "overflow"]
+        },
+        {
+          "id": "bo_02",
+          "turns": [
+            {"role": "user", "text": "What ECTS value does the English course have?"},
+            {"role": "user", "text": "What is Programming Challenge about?"},
+            {"role": "user", "text": "Tell me about Problem Solving."},
+            {"role": "user", "text": "What about the Web course?"},
+            {"role": "user", "text": "Compare Programming Challenge and Problem Solving."}
+          ],
+          "expected_behaviors": {
+            "still_remembers_programming_challenge_from_turn_2": true,
+            "explanation": "At turn 5, turn 2 is still inside the five-turn deque and should be available for comparison."
+          },
+          "checks": [
+            {"name": "still_remembers_programming_challenge_from_turn_2", "turn": 5, "expected": true, "must_include_any": ["Programming Challenge", "Problem Solving", "ACM", "real-life"]}
+          ],
+          "tags": ["boundary", "within_window"]
+        }
+      ]
+    }
+  ]
+}
