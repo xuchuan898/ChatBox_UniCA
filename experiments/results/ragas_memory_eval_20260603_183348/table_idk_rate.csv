@@ -1,0 +1,7 @@
+dimension,idk_rate,num_samples
+boundary_overflow,0.1667,6
+correction,0.625,8
+cross_reference,0.125,8
+ellipsis,0.1667,6
+follow_up,0.5,8
+pronoun_resolution,0.2222,9

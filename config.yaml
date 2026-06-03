@@ -35,3 +35,25 @@ generation:
   model_name: "qwen2.5:32b"
   temperature: 0.0
   num_predict: 256
+
+ragas_experiment:
+  dataset_path: "questions/rag_memory_challenge_dataset.json"
+  output_dir: "experiments/results/ragas_memory_eval"
+  results_file: "evaluation_results.json"
+  log_file: "experiment.log"
+  doc_file: "docs/chroma/master.md"
+  ollama_host: "http://127.0.0.1:11434"
+  ollama_bin_dir: "~/ollama/bin"
+  ollama_log_file: "~/ollama/ollama.log"
+  auto_start_ollama: true
+  evaluation_llm_model: "qwen2.5:32b"
+  evaluation_llm_temperature: 0.0
+  evaluation_embedding_model: "nomic-embed-text"
+  generation_model: "qwen2.5:32b"
+  generation_temperature: 0.0
+  generation_num_predict: 256
+  rerank_candidates: 10
+  ragas_timeout_seconds: 300
+  ragas_max_workers: 1
+  debug_retrieval: false
+  ragas_raise_exceptions: false

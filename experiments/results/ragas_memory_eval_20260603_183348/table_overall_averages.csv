@@ -1,0 +1,2 @@
+retrieval_recall,retrieval_precision,keyword_hit_rate,context_recall,faithfulness,answer_correctness,rag_elapsed_seconds,num_samples
+0.8526,0.1182,0.5622,0.8415,0.7116,0.4447,4.2352,45

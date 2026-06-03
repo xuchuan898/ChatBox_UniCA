@@ -1,0 +1,7 @@
+dimension,num_samples,retrieval_recall,retrieval_precision,keyword_hit_rate,context_recall,faithfulness,answer_correctness,rag_elapsed_seconds
+boundary_overflow,6,0.8333,0.0833,0.6111,0.75,0.9167,0.3784,12.3717
+correction,8,0.6458,0.1394,0.2812,0.5833,0.5,0.3419,2.9219
+cross_reference,8,0.9375,0.1333,0.7417,1.0,0.7946,0.435,3.1838
+ellipsis,6,0.7833,0.1505,0.575,0.7833,0.9167,0.6348,2.5172
+follow_up,8,1.0,0.1073,0.5,1.0,0.5833,0.3541,3.1815
+pronoun_resolution,9,0.8889,0.0975,0.6667,0.8889,0.6667,0.5427,2.9948

@@ -25,7 +25,10 @@
 !questions/test_memory_short_term.json
 !experiments/
 !experiments/run_memory_test.py
+!experiments/run_ragas_rag_evaluation.py
 !experiments/results/
 !experiments/results/memory_test_report.md
 !experiments/results/retrieval_weight_ablation_20260428_222229/
 !experiments/results/retrieval_weight_ablation_20260428_222229/**
+!experiments/results/ragas_memory_eval_20260603_183348/**
+!experiments/results/ragas_memory_eval_20260603_183348/

@@ -1,0 +1,7 @@
+dimension,retrieval_failure_rate,num_samples
+boundary_overflow,0.1667,6
+correction,0.125,8
+cross_reference,0.0,8
+ellipsis,0.0,6
+follow_up,0.0,8
+pronoun_resolution,0.1111,9
