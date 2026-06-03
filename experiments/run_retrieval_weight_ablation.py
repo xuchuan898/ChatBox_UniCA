@@ -14,6 +14,10 @@ from urllib.request import urlopen
 
 DEFAULT_SWEEP_VALUES = [round(x * 0.1, 1) for x in range(11)]
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -229,7 +233,18 @@ def ollama_is_ready(ollama_host: str) -> bool:
         return False
 
 
-def ensure_ollama(args: argparse.Namespace) -> dict:
+def configured_model_name(config_path: Path, explicit_model: str | None) -> str:
+    if explicit_model:
+        return explicit_model
+    try:
+        from core.config_loader import load_config
+        config = load_config(config_path)
+        return str(config["generation"]["model_name"])
+    except Exception:
+        return "qwen2.5:32b"
+
+
+def ensure_ollama(args: argparse.Namespace, model_name: str) -> dict:
     ollama_bin_dir = args.ollama_bin_dir.expanduser().resolve()
     ollama_bin = ollama_bin_dir / "ollama"
     if os.name == "nt" and not ollama_bin.exists():
@@ -1720,7 +1735,8 @@ def main() -> None:
         raise ValueError(f"No valid questions loaded from: {question_file}")
     gold_map = load_gold_map(gold_file if gold_file.exists() else None)
 
-    ollama_info = ensure_ollama(args)
+    model_name = configured_model_name(project_root / "config.yaml", None)
+    ollama_info = ensure_ollama(args, model_name)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = output_base / f"retrieval_weight_ablation_{run_id}"
     logs_dir = run_dir / "logs"

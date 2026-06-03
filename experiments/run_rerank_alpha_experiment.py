@@ -13,6 +13,11 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run dual-rerank alpha ablation with fixed base retrieval weights."
@@ -119,7 +124,18 @@ def ollama_is_ready(ollama_host: str) -> bool:
         return False
 
 
-def ensure_ollama(args: argparse.Namespace) -> dict:
+def configured_model_name(config_path: Path, explicit_model: str | None) -> str:
+    if explicit_model:
+        return explicit_model
+    try:
+        from core.config_loader import load_config
+        config = load_config(config_path)
+        return str(config["generation"]["model_name"])
+    except Exception:
+        return "qwen2.5:32b"
+
+
+def ensure_ollama(args: argparse.Namespace, model_name: str) -> dict:
     ollama_bin_dir = args.ollama_bin_dir.expanduser().resolve()
     ollama_bin = ollama_bin_dir / "ollama"
     if os.name == "nt" and not ollama_bin.exists():
@@ -630,7 +646,8 @@ def main() -> None:
             raise FileNotFoundError(f"Gold file not found: {gold_file}")
         gold_index = load_gold_index(gold_file)
 
-    ollama_info = ensure_ollama(args)
+    model_name = configured_model_name(Path(args.project_root) / "config.yaml" if hasattr(args, 'project_root') else project_root / "config.yaml", None)
+    ollama_info = ensure_ollama(args, model_name)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = output_base / f"rerank_alpha_experiment_{run_id}"
     logs_dir = run_dir / "logs"

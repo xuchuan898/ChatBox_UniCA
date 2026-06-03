@@ -12,6 +12,11 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run batch QA experiment across master.{md,txt,pdf} and collect comparable outputs."
@@ -149,6 +154,17 @@ def ollama_is_ready(ollama_host: str) -> bool:
             return True
     except (URLError, TimeoutError, OSError):
         return False
+
+
+def configured_model_name(config_path: Path, explicit_model: str | None) -> str:
+    if explicit_model:
+        return explicit_model
+    try:
+        from core.config_loader import load_config
+        config = load_config(config_path)
+        return str(config["generation"]["model_name"])
+    except Exception:
+        return "qwen2.5:32b"
 
 
 def ensure_ollama(args: argparse.Namespace) -> dict:
@@ -914,9 +930,6 @@ def write_retrieval_trace_md(run_dir: Path, runs: list[dict]) -> None:
                 base_candidates = event.get("base_count", "-")
             if reranked_kept is None:
                 reranked_kept = event.get("rerank_count", "-")
-
-            source_label = "markdown block" if block.get("cleaned_text") else ("debug fallback" if event else "missing")
-            prompt_label = "yes" if item.get("prompt") else "no"
             lines.append(
                 f"| {item['tag']} | {base_candidates} | {reranked_kept} | {source_label} | {prompt_label} |"
             )
@@ -1040,6 +1053,8 @@ def main() -> None:
     if not docs:
         raise ValueError("No doc files provided.")
 
+    model_name = configured_model_name(project_root / "config.yaml", None)
+
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = output_base / f"format_compare_{run_id}"
     logs_dir = run_dir / "logs"
@@ -1068,6 +1083,7 @@ def main() -> None:
     if ollama_info["started"]:
         print("[INFO] Auto-started ollama serve in background", flush=True)
     print(f"[INFO] Ollama ready: {ollama_info['ready']}", flush=True)
+    print(f"[INFO] Model name: {model_name}", flush=True)
 
     runs = []
     chat_box_path = project_root / "chat_box.py"

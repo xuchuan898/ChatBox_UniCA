@@ -65,15 +65,14 @@ class PassthroughRewriter(BaseQueryRewriter):
 
 
 class OllamaRewriter(BaseQueryRewriter):
-    """LLM-backed query rewriter using Ollama chat models."""
 
-    def __init__(self, model_name: str = "gemma3:4b", temperature: float = 0.0):
+    def __init__(self, model_name: str = "qwen2.5:32b", temperature: float = 0.0):
         self.llm = ChatOllama(
             model=model_name,
             temperature=temperature,
             seed=42,
             validate_model_on_init=True,
-            num_predict=256,
+            num_predict=256,   # 可调整为 128 加快改写
         )
 
     @staticmethod
@@ -88,49 +87,54 @@ class OllamaRewriter(BaseQueryRewriter):
         return "\n".join(lines)
 
     def rewrite(
-        self,
-        query: str,
-        lang: str,
-        num_variants: int,
-        history: Optional[List[Dict[str, str]]] = None,
+            self,
+            query: str,
+            lang: str,
+            num_variants: int,
+            history: Optional[List[Dict[str, str]]] = None,
     ) -> list[str]:
         if num_variants <= 0:
             return []
+
         formatted_history = self._format_history(history or [])
+
         if formatted_history:
-            REWRITE_PROMPT_WITH_HISTORY = (
-                "You are a query rewriter for a retrieval system. \n"
-                "Given the conversation history, rewrite the user's last question into a standalone query that can be understood without context.\n"
-                "\n"
-                "You MUST follow these steps:\n"
-                "1. Identify any vague references in the current question (pronouns like \"it\", \"they\", \"this\", \"that\", \"him\", or omitted subjects/objects).\n"
-                "2. Look back at the history to find the exact entity or phrase being referred to.\n"
-                "3. Rewrite the question by replacing the vague reference with that entity, and restore any missing details.\n"
-                "4. If the question is already standalone, return it unchanged.\n"
-                "\n"
-                "Output ONLY the final rewritten query, no explanation.\n"
-                "\n"
+            prompt = (
+                "You are a query rewriter for a retrieval system. "
+                "Your ONLY job is to rewrite the user's last question into a standalone query by resolving all vague references using the conversation history.\n\n"
+                "CRITICAL RULES:\n"
+                "1. NEVER answer the question. NEVER add information not explicitly present in the history.\n"
+                "2. If the assistant's last response does NOT mention the topic in the current question, trace back to the USER's previous messages to find the main subject.\n"
+                "3. Replace ALL pronouns (it, this, that, they, he, she) with the EXACT entity from history.\n"
+                "4. Maintain the original syntactic structure. If the original question is 'What does [X] say about [Y]?', "
+                "the rewritten form MUST be 'What does [resolved X] say about [Y]?'. Do NOT move the topic or append the entity at the end.\n"
+                "5. Do NOT invent entities like \"the assistant\" or \"the system\" as the subject.\n"
+                "6. If the question is already standalone, return it unchanged.\n"
+                "7. Output ONLY the rewritten query on a single line. No explanation, no markdown, no prefixes.\n\n"
+                "EXAMPLES:\n\n"
                 "Example 1:\n"
                 "History:\n"
                 "User: When was the Eiffel Tower built?\n"
                 "Assistant: It was completed in 1889.\n"
                 "Current question: How tall is it?\n"
-                "Rewritten query: How tall is the Eiffel Tower?\n"
-                "\n"
+                "Rewritten query: How tall is the Eiffel Tower?\n\n"
                 "Example 2:\n"
+                "History:\n"
+                "User: Who directed the movie Inception?\n"
+                "Assistant: Christopher Nolan directed it.\n"
+                "Current question: What else did he direct?\n"
+                "Rewritten query: What else did Christopher Nolan direct?\n\n"
+                "Example 3:\n"
                 "History:\n"
                 "User: Show me Italian restaurants nearby.\n"
                 "Assistant: There are three: La Piazza, Bella Napoli, and Il Forno.\n"
                 "Current question: What about the first one?\n"
-                "Rewritten query: What about La Piazza?\n"
-                "\n"
+                "Rewritten query: What about La Piazza?\n\n"
                 "Now process the following:\n"
-                "History:\n"
-                f"{formatted_history}\n"
-                f"Current question: {query}\n"
+                f"History:\n{formatted_history}\n\n"
+                f"Current question: {query}\n\n"
                 "Rewritten query:"
             )
-            prompt = REWRITE_PROMPT_WITH_HISTORY
         else:
             prompt = (
                 "You rewrite user search queries for retrieval.\n"
@@ -139,7 +143,12 @@ class OllamaRewriter(BaseQueryRewriter):
                 "Rules: keep meaning, concise, no explanations, one per line.\n"
                 f"Query: {query}"
             )
+
+
+        print("[DEBUG][REWRITE_PROMPT]", prompt)
+
         text = self.llm.invoke(prompt).content
+        print("[DEBUG][REWRITE_RAW_OUTPUT]", text)
         lines = [line.strip(" -\t") for line in str(text).splitlines() if line.strip()]
         unique = []
         seen = {query.lower()}

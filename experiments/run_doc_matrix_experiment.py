@@ -166,6 +166,17 @@ def discover_docs(docs_dir: Path) -> list[Path]:
     return docs
 
 
+def configured_model_name(config_path: Path, explicit_model: str | None) -> str:
+    if explicit_model:
+        return explicit_model
+    try:
+        from core.config_loader import load_config
+        config = load_config(config_path)
+        return str(config["generation"]["model_name"])
+    except Exception:
+        return "qwen2.5:32b"
+
+
 def load_question_catalog(path: Path) -> dict:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if "documents" not in payload:
