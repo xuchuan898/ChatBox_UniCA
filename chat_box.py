@@ -16,7 +16,7 @@ from core.config_loader import apply_cli_overrides, load_config
 from core.conversation_memory import ConversationMemory
 from core.generator import AnswerGenerator
 from core.indexer import ensure_index
-from core.query_expander import OllamaRewriter, PassthroughRewriter, QueryExpander
+from core.query_expander import OllamaRewriter, PassthroughRewriter, QueryExpander, QwenRewriter
 from core.reranker import CrossEncoderReranker
 from core.retriever import HybridRetriever
 from core.semantic_cache import SemanticCache
@@ -120,10 +120,13 @@ class _CompatQAChain:
 
 def _build_query_expander(config: dict[str, Any]) -> QueryExpander:
     qe_cfg = config["query_expansion"]
-    if qe_cfg.get("rewriter") == "passthrough":
+    rewriter_type = qe_cfg.get("rewriter", "qwen")
+    if rewriter_type == "passthrough":
         rewriter = PassthroughRewriter()
-    else:
+    elif rewriter_type == "ollama":
         rewriter = OllamaRewriter(model_name=qe_cfg.get("model_name", "gemma3:4b"))
+    else:
+        rewriter = QwenRewriter()
     return QueryExpander(
         rewriter=rewriter,
         num_paraphrases=int(qe_cfg.get("num_paraphrases", 1)),
@@ -174,6 +177,20 @@ def chatbox(
 
 def _serialize_docs(docs: list[Document]) -> list[dict[str, Any]]:
     return [{"chunk_id": d.metadata.get("chunk_id"), "source": d.metadata.get("source"), "preview": d.page_content[:220]} for d in docs]
+
+
+def _memory_history(memory: ConversationMemory | None) -> list[dict[str, str]]:
+    if not memory:
+        return []
+    history = []
+    for turn in memory.short_term:
+        user = str(turn.get("user", "")).strip()
+        assistant = str(turn.get("assistant", "")).strip()
+        if user:
+            history.append({"role": "user", "content": user})
+        if assistant:
+            history.append({"role": "assistant", "content": assistant})
+    return history
 
 
 def _write_chunks_jsonl(path: str, corpus: list[Document]) -> None:
@@ -240,11 +257,14 @@ def main() -> None:
     query_expander = _build_query_expander(config)
     if args.debug:
         qe = config["query_expansion"]
+        multi_turn = qe.get("multi_turn", {})
         print(
             f"[DEBUG][BOOT] query_expansion enabled={qe['enabled']} rewriter={qe['rewriter']} "
             f"model={qe['model_name']} paraphrases={qe['num_paraphrases']} "
             f"add_translation={qe['add_translation']} source_lang={qe['source_lang']} "
-            f"target_lang={qe['target_lang_for_translation']}"
+            f"target_lang={qe['target_lang_for_translation']} "
+            f"multi_turn={bool(multi_turn.get('enabled', True))} "
+            f"max_history_turns={int(multi_turn.get('max_history_turns', 5))}"
         )
         print(
             f"[DEBUG][BOOT] rerank multi_variant_enabled="
@@ -266,6 +286,8 @@ def main() -> None:
         rerank_candidates=int(config["retrieval"]["rerank_candidates"]),
         query_expander=query_expander,
         query_expansion_enabled=bool(config["query_expansion"]["enabled"]),
+        multi_turn_enabled=bool(config["query_expansion"].get("multi_turn", {}).get("enabled", True)),
+        max_history_turns=int(config["query_expansion"].get("multi_turn", {}).get("max_history_turns", 5)),
         debug=args.debug,
     )
     generator = AnswerGenerator(
@@ -312,7 +334,7 @@ def main() -> None:
         if args.debug:
             print(f"[DEBUG][CACHE] served=false seconds={time.perf_counter() - t_cache:.2f}")
         t_retrieve = time.perf_counter()
-        docs = retriever.retrieve(question)
+        docs = retriever.retrieve(question, history=_memory_history(memory))
         retrieve_sec = time.perf_counter() - t_retrieve
         t_prompt = time.perf_counter()
         prompt = generator.render_prompt(question, docs, mem_ctx)

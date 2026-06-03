@@ -79,6 +79,20 @@ class Pipeline:
             "content": content,
         }
 
+    @staticmethod
+    def memory_history(memory: Any | None) -> list[dict[str, str]]:
+        if not memory:
+            return []
+        history = []
+        for turn in getattr(memory, "short_term", []):
+            user = str(turn.get("user", "")).strip()
+            assistant = str(turn.get("assistant", "")).strip()
+            if user:
+                history.append({"role": "user", "content": user})
+            if assistant:
+                history.append({"role": "assistant", "content": assistant})
+        return history
+
     def run_one(self, question: str, memory: Any | None) -> dict[str, Any]:
         memory_context = ""
         if memory:
@@ -98,7 +112,7 @@ class Pipeline:
                     "cache_hit": True,
                 }
 
-        docs = self.retriever.retrieve(question)
+        docs = self.retriever.retrieve(question, history=self.memory_history(memory))
         prompt = self.generator.render_prompt(question, docs, memory_context)
         answer = str(self.generator.llm.invoke(prompt).content)
         if self.cache:
@@ -352,6 +366,8 @@ def build_pipeline(args: argparse.Namespace) -> Pipeline:
         rerank_candidates=int(config["retrieval"]["rerank_candidates"]),
         query_expander=query_expander,
         query_expansion_enabled=bool(config["query_expansion"]["enabled"]),
+        multi_turn_enabled=bool(config["query_expansion"].get("multi_turn", {}).get("enabled", True)),
+        max_history_turns=int(config["query_expansion"].get("multi_turn", {}).get("max_history_turns", 5)),
         debug=args.debug,
     )
     generator = AnswerGenerator(

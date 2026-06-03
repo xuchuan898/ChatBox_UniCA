@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import time
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
 
@@ -41,6 +41,8 @@ class HybridRetriever:
         rerank_candidates: int = 30,
         query_expander: QueryExpander | None = None,
         query_expansion_enabled: bool = False,
+        multi_turn_enabled: bool = True,
+        max_history_turns: int = 5,
         debug: bool = False,
     ):
         self.vectordb = vectordb
@@ -54,6 +56,8 @@ class HybridRetriever:
         self.rerank_candidates = rerank_candidates
         self.query_expander = query_expander
         self.query_expansion_enabled = query_expansion_enabled
+        self.multi_turn_enabled = multi_turn_enabled
+        self.max_history_turns = max(0, int(max_history_turns))
         self.debug = debug
         self.retrieval_cache: dict[str, list[Document]] = {}
 
@@ -84,18 +88,56 @@ class HybridRetriever:
         close = sum(1 for s in tail if (cutoff - s) <= 0.03)
         return min(len(reranked_scored), base + close)
 
-    def retrieve(self, question: str) -> list[Document]:
+    def _normalize_history(
+        self,
+        history: Optional[List[Dict[str, str]]] = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+    ) -> list[dict[str, str]]:
+        if not self.multi_turn_enabled:
+            return []
+        source = history if history is not None else chat_history
+        if not source:
+            return []
+        messages: list[dict[str, str]] = []
+        for item in source:
+            if "role" in item and "content" in item:
+                role = str(item.get("role", "")).lower()
+                content = " ".join(str(item.get("content", "")).split())
+                if role in {"user", "assistant"} and content:
+                    messages.append({"role": role, "content": content})
+                continue
+            user = " ".join(str(item.get("user", "")).split())
+            assistant = " ".join(str(item.get("assistant", "")).split())
+            if user:
+                messages.append({"role": "user", "content": user})
+            if assistant:
+                messages.append({"role": "assistant", "content": assistant})
+        if self.max_history_turns <= 0:
+            return []
+        return messages[-self.max_history_turns * 2 :]
+
+    def retrieve(
+        self,
+        question: str,
+        history: Optional[List[Dict[str, str]]] = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+    ) -> list[Document]:
         t0 = time.perf_counter()
-        if question in self.retrieval_cache:
+        normalized_history = self._normalize_history(history=history, chat_history=chat_history)
+        cache_key = question if not normalized_history else f"{question}\n__history__={normalized_history!r}"
+        if cache_key in self.retrieval_cache:
             if self.debug:
                 print(f"[DEBUG][RETRIEVE][CACHE_HIT] q={question!r}")
-            return self.retrieval_cache.pop(question)
+            return self.retrieval_cache.pop(cache_key)
         queries = [question]
         if self.query_expansion_enabled and self.query_expander:
             t_expand = time.perf_counter()
-            queries = self.query_expander.expand(question)
+            queries = self.query_expander.expand(question, history=normalized_history)
             if self.debug:
-                print(f"[DEBUG][EXPAND] enabled=true variants={len(queries)} seconds={time.perf_counter() - t_expand:.2f}")
+                print(
+                    f"[DEBUG][EXPAND] enabled=true variants={len(queries)} "
+                    f"history_messages={len(normalized_history)} seconds={time.perf_counter() - t_expand:.2f}"
+                )
         elif self.debug:
             print("[DEBUG][EXPAND] enabled=false variants=1 seconds=0.00")
         ranked_lists: list[tuple[list[Document], float]] = []
@@ -124,7 +166,7 @@ class HybridRetriever:
         reranked_scored = [(doc, score) for doc, score, _, _ in reranked]
         top_k = self._dynamic_top_k(reranked_scored)
         docs = [doc for doc, _ in reranked_scored[:top_k]]
-        self.retrieval_cache[question] = docs
+        self.retrieval_cache[cache_key] = docs
         if self.debug:
             escaped_question = question.replace("`", "'")
             print(f"[DEBUG][RETRIEVE] q={question!r} variants={len(queries)} base_count={len(merged)} rerank_count={len(reranked_scored)} answer_top_k={top_k}")

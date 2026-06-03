@@ -11,12 +11,15 @@ retrieval:
 
 query_expansion:
   enabled: true
-  rewriter: "ollama"
-  model_name: "gemma3:4b"
+  rewriter: "qwen"
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct"
   num_paraphrases: 1
   add_translation: true
   source_lang: "auto"
   target_lang_for_translation: "auto"
+  multi_turn:
+    enabled: true
+    max_history_turns: 5   # Keep the most recent N conversation turns
 
 cache:
   enabled: false

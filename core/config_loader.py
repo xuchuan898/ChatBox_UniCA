@@ -26,6 +26,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "add_translation": True,
         "source_lang": "auto",
         "target_lang_for_translation": "auto",
+        "multi_turn": {"enabled": True, "max_history_turns": 5},
     },
     "cache": {"enabled": True, "threshold": 0.92, "ttl": 86400},
     "memory": {"enabled": True, "short_term_rounds": 5, "long_term_enabled": False},
