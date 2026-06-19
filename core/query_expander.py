@@ -105,10 +105,14 @@ class OllamaRewriter(BaseQueryRewriter):
                 "CRITICAL RULES:\n"
                 "1. NEVER answer the question. NEVER add information not explicitly present in the history.\n"
                 "2. If the assistant's last response does NOT mention the topic in the current question, trace back to the USER's previous messages to find the main subject.\n"
-                "3. Replace ALL pronouns (it, this, that, they, he, she) with the EXACT entity from history.\n"
+                "3. Replace ALL pronouns with the EXACT entity from history.\n"
+                "   - For people: replace he/she/him/her, and they (when referring to people) with the exact name or title.\n"
+                "   - For things: replace it/this/that, and they (when referring to things) with the exact object, concept, or term mentioned earlier.\n"
+                "   - VERY IMPORTANT: it, this, that are NEVER people. Never replace them with \"the assistant\", \"the user\", \"the system\", or any person. They always refer to objects, topics, courses, documents, etc.\n"
+                "   - If the pronoun does NOT have a clear exact match in the history, KEEP the pronoun unchanged. Do not guess.\n"
                 "4. Maintain the original syntactic structure. If the original question is 'What does [X] say about [Y]?', "
                 "the rewritten form MUST be 'What does [resolved X] say about [Y]?'. Do NOT move the topic or append the entity at the end.\n"
-                "5. Do NOT invent entities like \"the assistant\" or \"the system\" as the subject.\n"
+                "5. Do NOT invent entities like \"the assistant\", \"the system\", \"the previous response\", or any speaker role. The only allowed subjects are those explicitly named by the user or assistant.\n"
                 "6. If the question is already standalone, return it unchanged.\n"
                 "7. Output ONLY the rewritten query on a single line. No explanation, no markdown, no prefixes.\n\n"
                 "EXAMPLES:\n\n"
@@ -277,6 +281,29 @@ class QwenRewriter(BaseQueryRewriter):
 class QueryExpander:
     """Expand user query with paraphrases and cross-language translation."""
 
+    _PRONOUN_RE = re.compile(
+        r"\b(it|they|this|that|these|those|he|she|him|her|his|hers|its|their|them)\b",
+        re.IGNORECASE,
+    )
+    _STARTER_WORDS = {
+        "tell",
+        "what",
+        "which",
+        "who",
+        "when",
+        "where",
+        "why",
+        "how",
+        "can",
+        "could",
+        "would",
+        "should",
+        "is",
+        "are",
+        "do",
+        "does",
+    }
+
     def __init__(
         self,
         rewriter: BaseQueryRewriter,
@@ -290,6 +317,36 @@ class QueryExpander:
         self.add_translation = add_translation
         self.source_lang = source_lang
         self.target_lang_for_translation = target_lang_for_translation
+
+    def _has_proper_entity(self, query: str) -> bool:
+        """Detect explicit named entities such as course names, people, acronyms."""
+        for idx, match in enumerate(re.finditer(r"\b[A-Z][A-Za-z0-9_-]*\b", query)):
+            token = match.group(0)
+
+            if len(token) > 1 and token.isupper():
+                return True
+
+            if idx == 0 and token.lower() in self._STARTER_WORDS:
+                continue
+
+            return True
+
+        return False
+
+    def _needs_rewrite(self, query: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
+        """Decide whether paraphrase/context rewrite should call the LLM."""
+        words = re.findall(r"\b[\w'-]+\b", query)
+
+        if self._PRONOUN_RE.search(query):
+            return True
+
+        if len(words) <= 4:
+            return True
+
+        if history and not self._has_proper_entity(query):
+            return True
+
+        return False
 
     def _resolve_source_lang(self, query: str) -> str:
         if self.source_lang in {"en", "fr"}:
@@ -330,22 +387,34 @@ class QueryExpander:
                     return False
         return True
 
-    def expand(self, query: str, history: Optional[List[Dict[str, str]]] = None) -> list[str]:
-        """Expand query. Fallback to original query on any failure."""
+    def expand(self, query: str, history: Optional[List[Dict[str, str]]] = None) -> tuple[list[str], bool]:
+        """Expand query. Returns (query_variants, rewritten). Translation does not count as rewrite."""
         base = " ".join(query.split())
         if not base:
-            return [query]
+            return [query], False
+
+        rewritten = False
+
         try:
             source_lang = self._resolve_source_lang(base)
             result: List[str] = [base]
-            if self.num_paraphrases > 0:
-                rewrites = self.rewriter.rewrite(base, source_lang, self.num_paraphrases, history=history)
+
+            if self.num_paraphrases > 0 and self._needs_rewrite(base, history):
+                rewrites = self.rewriter.rewrite(
+                    base,
+                    source_lang,
+                    self.num_paraphrases,
+                    history=history,
+                )
                 for rw in rewrites:
                     if self._is_rewrite_valid(base, rw):
                         result.append(rw)
+                        rewritten = True
+
             if self.add_translation:
                 target = self._resolve_target_lang(source_lang)
                 result.append(self.rewriter.translate(base, source_lang, target))
+
             dedup = []
             seen = set()
             for item in result:
@@ -354,6 +423,8 @@ class QueryExpander:
                 if cleaned and key not in seen:
                     seen.add(key)
                     dedup.append(cleaned)
-            return dedup or [base]
+
+            return dedup or [base], rewritten
+
         except Exception:
-            return [base]
+            return [base], False

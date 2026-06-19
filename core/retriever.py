@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
 
-from .query_expander import QueryExpander
+from .query_expander import QueryExpander, detect_language
 from .reranker import CrossEncoderReranker
 
 
@@ -38,6 +38,9 @@ class HybridRetriever:
         reranker: CrossEncoderReranker,
         weight_vec: float = 1.25,
         weight_bm25: float = 0.75,
+        original_weight: float = 1.0,
+        paraphrase_weight: float = 1.2,
+        translation_weight: float = 0.85,
         rerank_candidates: int = 30,
         query_expander: QueryExpander | None = None,
         query_expansion_enabled: bool = False,
@@ -53,6 +56,9 @@ class HybridRetriever:
         self.reranker = reranker
         self.weight_vec = weight_vec
         self.weight_bm25 = weight_bm25
+        self.original_weight = original_weight
+        self.paraphrase_weight = paraphrase_weight
+        self.translation_weight = translation_weight
         self.rerank_candidates = rerank_candidates
         self.query_expander = query_expander
         self.query_expansion_enabled = query_expansion_enabled
@@ -121,6 +127,7 @@ class HybridRetriever:
         question: str,
         history: Optional[List[Dict[str, str]]] = None,
         chat_history: Optional[List[Dict[str, str]]] = None,
+        rewritten: bool = False,
     ) -> list[Document]:
         t0 = time.perf_counter()
         normalized_history = self._normalize_history(history=history, chat_history=chat_history)
@@ -130,20 +137,31 @@ class HybridRetriever:
                 print(f"[DEBUG][RETRIEVE][CACHE_HIT] q={question!r}")
             return self.retrieval_cache.pop(cache_key)
         queries = [question]
+
         if self.query_expansion_enabled and self.query_expander:
             t_expand = time.perf_counter()
-            queries = self.query_expander.expand(question, history=normalized_history)
+            queries, rewritten = self.query_expander.expand(question, history=normalized_history)
+
             if self.debug:
                 print(
                     f"[DEBUG][EXPAND] enabled=true variants={len(queries)} "
+                    f"rewritten={rewritten} "
                     f"history_messages={len(normalized_history)} seconds={time.perf_counter() - t_expand:.2f}"
                 )
         elif self.debug:
-            print("[DEBUG][EXPAND] enabled=false variants=1 seconds=0.00")
+            print("[DEBUG][EXPAND] enabled=false variants=1 rewritten=false seconds=0.00")
+
         ranked_lists: list[tuple[list[Document], float]] = []
         t_retrieve = time.perf_counter()
+        source_lang = detect_language(queries[0])
+
         for idx, q in enumerate(queries):
-            factor = 1.0 if idx == 0 else 0.85
+            if idx == 0:
+                factor = self.original_weight
+            elif detect_language(q) == source_lang:
+                factor = self.paraphrase_weight
+            else:
+                factor = self.translation_weight
             ranked_lists.append((self.base_retriever.invoke(q), self.weight_vec * factor))
             ranked_lists.append((self._bm25_docs(q), self.weight_bm25 * factor))
         retrieve_sec = time.perf_counter() - t_retrieve

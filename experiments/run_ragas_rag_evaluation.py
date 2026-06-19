@@ -179,11 +179,17 @@ class LoggingQueryExpander:
         self.logger = logger
         self.last_variants: list[str] = []
 
-    def expand(self, query: str, history: list[dict[str, str]] | None = None) -> list[str]:
-        variants = self.inner.expand(query, history=history)
+    def expand(self, query: str, history: list[dict[str, str]] | None = None) -> tuple[list[str], bool]:
+        variants, rewritten = self.inner.expand(query, history=history)
         self.last_variants = variants
-        self.logger.info("Query expansion input=%r history_messages=%d variants=%s", query, len(history or []), variants)
-        return variants
+        self.logger.info(
+            "Query expansion input=%r history_messages=%d rewritten=%s variants=%s",
+            query,
+            len(history or []),
+            rewritten,
+            variants,
+        )
+        return variants, rewritten
 
 
 def build_query_expander(config: dict[str, Any], logger: logging.Logger) -> LoggingQueryExpander:
@@ -261,6 +267,9 @@ def build_rag_components(config: dict[str, Any], exp_cfg: dict[str, Any], logger
         reranker=reranker,
         weight_vec=float(config["retrieval"].get("weight_vec", 1.25)),
         weight_bm25=float(config["retrieval"].get("weight_bm25", 0.75)),
+        original_weight=float(config["retrieval"].get("original_weight", 1.0)),
+        paraphrase_weight=float(config["retrieval"].get("paraphrase_weight", 1.2)),
+        translation_weight=float(config["retrieval"].get("translation_weight", 0.85)),
         rerank_candidates=int(exp_cfg.get("rerank_candidates", 10)),
         query_expander=query_expander,
         query_expansion_enabled=bool(config["query_expansion"].get("enabled", True)),

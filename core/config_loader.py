@@ -14,6 +14,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "retrieval": {
         "weight_vec": 1.25,
         "weight_bm25": 0.75,
+        "original_weight": 1.0,
+        "paraphrase_weight": 1.2,
+        "translation_weight": 0.85,
         "rerank_candidates": 30,
         "rerank_alpha": 0.5,
         "multi_variant_rerank_enabled": False,
