@@ -32,3 +32,8 @@
 !experiments/results/retrieval_weight_ablation_20260428_222229/**
 !experiments/results/ragas_memory_eval_20260603_183348/**
 !experiments/results/ragas_memory_eval_20260603_183348/
+
+!api/
+!api/**
+!services/
+!services/**
