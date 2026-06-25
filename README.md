@@ -293,6 +293,8 @@ api/
 services/
 ├── session_service.py   # In-memory session pool
 └── rag_service.py       # Full RAG pipeline orchestration
+
+frontend/                # Vue 3 chat UI (see Frontend section below)
 ```
 
 ---
@@ -336,9 +338,7 @@ ssh -L ${LOCAL_PORT}:${TARGET_HOST}:${REMOTE_PORT} \
 Assume your username is `bma`, jump host is `access.grid5000.fr`, intermediate node is `sophia`, and compute node is `esterel34-1`:
 
 ```bash
-ssh -L 8000:esterel34-1:8000 \
-    -o ProxyCommand="ssh -W %h:%p bma@access.grid5000.fr" \
-    bma@sophia
+ssh -L 8000:esterel34-1:8000  -o ProxyCommand="ssh -W %h:%p bma@access.grid5000.fr" bma@sophia
 ```
 
 > **Replace `esterel34-1` and `sophia` with your actual node names.**
@@ -567,4 +567,75 @@ curl http://127.0.0.1:8000/health
 | `${TARGET_HOST}` | Compute node (short name) | `esterel34-1` | After logging into the intermediate node, run `hostname` |
 | `${LOCAL_PORT}` | Local mapped port | `8000` | Any available port; should match the remote port |
 | `${REMOTE_PORT}` | Remote service port | `8000` | The port used when starting FastAPI |
+
+---
+
+# ChatBox_UniCA Frontend
+
+Vue 3 frontend providing a chat UI for the RAG API.
+
+## Quick Start
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
+
+Open `http://localhost:5173` in your browser. The dev server proxies `/api` requests to the backend at `http://127.0.0.1:8000`.
+
+## Features
+
+- **JSON / SSE toggle** — switch between standard JSON and streaming (SSE) responses.
+- **Parameter overrides** — adjust `top_k`, `rerank_alpha`, `weight_vec`, `weight_bm25`, and toggle query expansion from the UI.
+- **Session management** — create new sessions or clear session memory from the sidebar.
+- **Index management** — view index status and trigger a rebuild from the sidebar.
+- **Source citations** — each assistant message shows a collapsible list of retrieved source documents.
+- **Streaming indicators** — real-time stage display (retrieving / generating) with animated dots.
+- **Toast notifications** — success/error/info messages for all actions.
+
+## Project Structure
+
+```
+frontend/
+├── index.html
+├── package.json
+├── vite.config.js              # Dev proxy: /api → localhost:8000
+├── .env.example                # VITE_API_BASE_URL
+├── README.md
+└── src/
+    ├── main.js                 # Vue app entry
+    ├── App.vue                 # Root layout (sidebar + chat)
+    ├── api/
+    │   ├── client.js           # fetch wrapper + SSE stream parser
+    │   ├── chat.js             # POST /api/v1/chat/
+    │   ├── sessions.js         # POST/DELETE /api/v1/sessions/
+    │   └── index.js            # GET/POST /api/v1/index/
+    ├── composables/
+    │   ├── useChat.js          # Message list, streaming state, session lifecycle
+    │   └── useToast.js         # Toast notification management
+    ├── components/
+    │   ├── Sidebar.vue         # Left panel: status, sessions, index, model info
+    │   ├── ChatInterface.vue   # Main chat area: header, messages, input
+    │   ├── MessageBubble.vue   # Message bubble with Markdown, sources, streaming animation
+    │   ├── OverrideControls.vue# Collapsible overrides panel (sliders + checkbox)
+    │   ├── StatusCard.vue      # System status card (online/offline, doc count, session ID)
+    │   └── ToastContainer.vue  # Global toast notification container
+    └── styles/
+        ├── main.css            # Global styles, CSS variables, reset
+        └── chat.css            # Chat-specific layout and component styles
+```
+
+## Scripts
+
+| Command | Description |
+| :--- | :--- |
+| `npm run dev` | Start dev server with hot reload |
+| `npm run build` | Build for production (output in `dist/`) |
+| `npm run preview` | Preview the production build |
+
+## Environment Variables
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `VITE_API_BASE_URL` | (empty, uses Vite proxy) | Backend API base URL |

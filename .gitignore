@@ -37,3 +37,10 @@
 !api/**
 !services/
 !services/**
+
+!requirements.txt
+!run_chatbox_with_ollama.sh
+!run_experiment_with_ollama.sh
+
+!frontend/
+!frontend/**
