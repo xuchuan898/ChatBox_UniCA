@@ -34,7 +34,7 @@ export function useChat() {
     })
   }
 
-  async function send(query, useStream, overrides) {
+  async function send(query, useStream) {
     if (!query.trim()) return
 
     if (!sessionId.value) {
@@ -45,16 +45,16 @@ export function useChat() {
     addMessage('user', query)
 
     if (useStream) {
-      await _sendStream(query, overrides)
+      await _sendStream(query)
     } else {
-      await _sendJson(query, overrides)
+      await _sendJson(query)
     }
   }
 
-  async function _sendJson(query, overrides) {
+  async function _sendJson(query) {
     loading.value = true
     try {
-      const data = await sendMessage(query, sessionId.value, overrides)
+      const data = await sendMessage(query, sessionId.value)
       addMessage('assistant', data.answer, {
         sources: data.sources || [],
         elapsed: data.elapsed_seconds,
@@ -67,7 +67,7 @@ export function useChat() {
     }
   }
 
-  async function _sendStream(query, overrides) {
+  async function _sendStream(query) {
     streaming.value = true
     retrieving.value = true
     currentStage.value = 'retrieving'
@@ -87,7 +87,7 @@ export function useChat() {
       await sendMessageStream(
         query,
         sessionId.value,
-        overrides,
+        {},
         (event) => {
           const { stage, ...data } = event
           if (stage === 'retrieving') {

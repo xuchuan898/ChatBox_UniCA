@@ -71,9 +71,9 @@ async function refreshStatus() {
   }
 }
 
-async function handleSend(query, overrides) {
+async function handleSend(query) {
   try {
-    await send(query, useStream.value, Object.keys(overrides).length ? overrides : null)
+    await send(query, useStream.value)
   } catch (e) {
     toastError(e.message)
   }

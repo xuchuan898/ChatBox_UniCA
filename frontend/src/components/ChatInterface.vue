@@ -68,7 +68,7 @@
       </div>
       <div class="input-area__hint">Press Enter to send, Shift+Enter for new line</div>
 
-      <OverrideControls v-model="overrides" />
+      <OverrideControls />
     </div>
   </div>
 </template>
@@ -90,7 +90,6 @@ const props = defineProps({
 const emit = defineEmits(['send', 'toggle-stream'])
 
 const inputText = ref('')
-const overrides = ref({})
 const messagesRef = ref(null)
 const textareaRef = ref(null)
 
@@ -109,7 +108,7 @@ function onSend() {
   if (textareaRef.value) {
     textareaRef.value.style.height = 'auto'
   }
-  emit('send', text, overrides.value)
+  emit('send', text)
 }
 
 // Auto-scroll on new messages

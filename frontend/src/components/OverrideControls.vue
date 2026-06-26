@@ -4,23 +4,23 @@
     <div class="override-panel__body">
       <div class="override-field">
         <span class="override-field__label">
-          <span>top_k</span>
-          <span>{{ local.top_k }}</span>
+          <span>rerank_candidates</span>
+          <span>{{ local.rerank_candidates }}</span>
         </span>
         <input
           type="range"
           class="override-field__input"
-          min="1"
-          max="20"
+          min="5"
+          max="50"
           step="1"
-          :value="local.top_k"
-          @input="update('top_k', Number($event.target.value))"
+          :value="local.rerank_candidates"
+          @input="local.rerank_candidates = Number($event.target.value)"
         />
       </div>
       <div class="override-field">
         <span class="override-field__label">
-          <span>rerank_alpha</span>
-          <span>{{ local.rerank_alpha }}</span>
+          <span>dynamic_topk_ratio</span>
+          <span>{{ local.dynamic_topk_ratio }}</span>
         </span>
         <input
           type="range"
@@ -28,8 +28,8 @@
           min="0"
           max="1"
           step="0.05"
-          :value="local.rerank_alpha"
-          @input="update('rerank_alpha', Number($event.target.value))"
+          :value="local.dynamic_topk_ratio"
+          @input="local.dynamic_topk_ratio = Number($event.target.value)"
         />
       </div>
       <div class="override-field">
@@ -44,7 +44,7 @@
           max="2"
           step="0.05"
           :value="local.weight_vec"
-          @input="update('weight_vec', Number($event.target.value))"
+          @input="local.weight_vec = Number($event.target.value)"
         />
       </div>
       <div class="override-field">
@@ -59,7 +59,37 @@
           max="2"
           step="0.05"
           :value="local.weight_bm25"
-          @input="update('weight_bm25', Number($event.target.value))"
+          @input="local.weight_bm25 = Number($event.target.value)"
+        />
+      </div>
+      <div class="override-field">
+        <span class="override-field__label">
+          <span>temperature</span>
+          <span>{{ local.temperature }}</span>
+        </span>
+        <input
+          type="range"
+          class="override-field__input"
+          min="0"
+          max="1"
+          step="0.05"
+          :value="local.temperature"
+          @input="local.temperature = Number($event.target.value)"
+        />
+      </div>
+      <div class="override-field">
+        <span class="override-field__label">
+          <span>num_predict</span>
+          <span>{{ local.num_predict }}</span>
+        </span>
+        <input
+          type="range"
+          class="override-field__input"
+          min="64"
+          max="4096"
+          step="32"
+          :value="local.num_predict"
+          @input="local.num_predict = Number($event.target.value)"
         />
       </div>
       <div class="override-field">
@@ -67,49 +97,76 @@
           <input
             type="checkbox"
             :checked="local.query_expansion !== false"
-            @change="update('query_expansion', $event.target.checked ? null : false)"
+            @change="local.query_expansion = $event.target.checked ? null : false"
           />
           Enable query expansion
         </label>
+      </div>
+      <div class="override-panel__actions">
+        <button class="override-btn override-btn--apply" @click="applyAndNotify">Apply</button>
+        <button class="override-btn override-btn--save" @click="saveAndNotify">Apply & Save to Disk</button>
       </div>
     </div>
   </details>
 </template>
 
 <script setup>
-import { reactive, watch } from 'vue'
+import { reactive } from 'vue'
+import { updateConfig, writeConfig } from '../api/config.js'
+import { useToast } from '../composables/useToast.js'
 
-const props = defineProps({
-  modelValue: { type: Object, default: () => ({}) },
-})
-
-const emit = defineEmits(['update:modelValue'])
+const { success, error: showError } = useToast()
 
 const defaults = {
-  top_k: 5,
-  rerank_alpha: 0.5,
-  weight_vec: 1.0,
-  weight_bm25: 1.0,
+  rerank_candidates: 30,
+  dynamic_topk_ratio: 0.5,
+  weight_vec: 1.25,
+  weight_bm25: 0.75,
+  temperature: 0.0,
+  num_predict: 256,
   query_expansion: null,
 }
 
-const local = reactive({ ...defaults, ...props.modelValue })
+const local = reactive({ ...defaults })
 
-watch(() => props.modelValue, (val) => {
-  Object.assign(local, { ...defaults, ...val })
-})
+function buildOverrides() {
+  const o = {}
+  if (local.rerank_candidates !== 30) o['retrieval.rerank_candidates'] = local.rerank_candidates
+  if (local.dynamic_topk_ratio !== 0.5) o['retrieval.dynamic_topk_ratio'] = local.dynamic_topk_ratio
+  if (local.weight_vec !== 1.25) o['retrieval.weight_vec'] = local.weight_vec
+  if (local.weight_bm25 !== 0.75) o['retrieval.weight_bm25'] = local.weight_bm25
+  if (local.temperature !== 0.0) o['generation.temperature'] = local.temperature
+  if (local.num_predict !== 256) o['generation.num_predict'] = local.num_predict
+  if (local.query_expansion === false) o['query_expansion.enabled'] = false
+  return o
+}
 
-function update(key, value) {
-  local[key] = value
-  const payload = { ...local }
-  // Build override dict
-  const overrides = {}
-  if (payload.top_k !== 5) overrides.top_k = payload.top_k
-  if (payload.rerank_alpha !== 0.5) overrides['retrieval.rerank_alpha'] = payload.rerank_alpha
-  if (payload.weight_vec !== 1.0) overrides['retrieval.weight_vec'] = payload.weight_vec
-  if (payload.weight_bm25 !== 1.0) overrides['retrieval.weight_bm25'] = payload.weight_bm25
-  if (payload.query_expansion === false) overrides['query_expansion.enabled'] = false
-  emit('update:modelValue', overrides)
+async function applyAndNotify() {
+  const overrides = buildOverrides()
+  if (!Object.keys(overrides).length) {
+    success('No changes to apply')
+    return
+  }
+  try {
+    await updateConfig(overrides)
+    success('Config applied')
+  } catch (e) {
+    showError('Apply failed: ' + e.message)
+  }
+}
+
+async function saveAndNotify() {
+  const overrides = buildOverrides()
+  if (!Object.keys(overrides).length) {
+    success('No changes to save')
+    return
+  }
+  try {
+    await writeConfig(overrides)
+    success('Config saved to disk')
+  } catch (e) {
+    showError('Save failed: ' + e.message)
+  }
 }
 </script>
 
@@ -159,5 +216,34 @@ function update(key, value) {
   font-size: 13px;
   color: #1e293b;
   cursor: pointer;
+}
+.override-panel__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.override-btn {
+  flex: 1;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.override-btn--apply {
+  background: #4f46e5;
+  color: #fff;
+  border-color: #4f46e5;
+}
+.override-btn--apply:hover {
+  background: #4338ca;
+}
+.override-btn--save {
+  background: #fff;
+  color: #1e293b;
+}
+.override-btn--save:hover {
+  background: #f1f5f9;
 }
 </style>
