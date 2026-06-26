@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
@@ -124,8 +125,24 @@ async def lifespan(app: FastAPI):
         bool(state.generator),
         bool(state.cache),
     )
+    # Warmup: trigger model loading (embedding, reranker) before first user request
+    asyncio.ensure_future(_warmup_models(state))
     yield
     logger.info("Shutting down ChatBox_UniCA API server...")
+
+
+async def _warmup_models(state) -> None:
+    """Warm up embedding/reranker models so first user request is fast."""
+    try:
+        logger.info("Warming up models ...")
+        docs = await asyncio.to_thread(state.retriever.retrieve, "warmup", top_n=1)
+        if docs:
+            await asyncio.to_thread(
+                state.retriever.reranker.rerank, "warmup", docs[:1], top_n=1
+            )
+        logger.info("Warmup complete")
+    except Exception:
+        logger.warning("Warmup failed (non-fatal)", exc_info=True)
 
 
 def create_app() -> FastAPI:

@@ -9,6 +9,7 @@ retrieval:
   paraphrase_weight: 1.2
   translation_weight: 0.85
   rerank_candidates: 30
+  dynamic_topk_ratio: 0.5
   rerank_alpha: 0.5
   multi_variant_rerank_enabled: false
 
