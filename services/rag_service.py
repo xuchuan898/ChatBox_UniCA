@@ -93,6 +93,7 @@ class RAGService:
         self.retriever.weight_vec = retrieval_cfg.get("weight_vec", 1.25)
         self.retriever.weight_bm25 = retrieval_cfg.get("weight_bm25", 0.75)
         self.retriever.rerank_candidates = retrieval_cfg.get("rerank_candidates", 30)
+        self.retriever.dynamic_topk_ratio = retrieval_cfg.get("dynamic_topk_ratio", 0.1)
         self.reranker.alpha = retrieval_cfg.get("rerank_alpha", 0.5)
 
         docs = await asyncio.to_thread(self.retriever.retrieve, request.query, history)
@@ -154,27 +155,15 @@ class RAGService:
         self.retriever.weight_vec = retrieval_cfg.get("weight_vec", 1.25)
         self.retriever.weight_bm25 = retrieval_cfg.get("weight_bm25", 0.75)
         self.retriever.rerank_candidates = retrieval_cfg.get("rerank_candidates", 30)
+        self.retriever.dynamic_topk_ratio = retrieval_cfg.get("dynamic_topk_ratio", 0.1)
         self.reranker.alpha = retrieval_cfg.get("rerank_alpha", 0.5)
 
-        # 3) Hybrid retrieval
+        # 3) Hybrid retrieval (reranking + dynamic top-k is done inside)
         docs = self.retriever.retrieve(request.query, history=history)
 
-        # 4) Rerank and inject scores
-        if docs:
-            queries = [request.query]
-            if self.retriever.query_expansion_enabled and self.retriever.query_expander:
-                qe = self.retriever.query_expander
-                queries, _ = qe.expand(request.query, history=history)
-            reranked = self.reranker.rerank(
-                request.query,
-                docs,
-                top_n=len(docs),
-                return_scores=True,
-                query_variants=queries,
-            )
-            for doc, score, _, _ in reranked:
-                doc.metadata["_rerank_score"] = score
-            docs = [doc for doc, _, _, _ in reranked]
+        # 4) Inject rerank scores for frontend display
+        for doc in docs:
+            doc.metadata.setdefault("_rerank_score", 0.0)
 
         # 5) Generate answer
         answer = self.generator.answer(request.query, docs, "")

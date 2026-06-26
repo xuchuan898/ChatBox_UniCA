@@ -22,7 +22,12 @@ async def index_status() -> IndexStatusResponse:
     state = get_app_state()
     cfg = state.config
     persist_dir = Path(cfg.get("indexing", {}).get("persist_dir", "./index_store"))
+
     meta = load_index_meta(persist_dir)
+    if meta is None:
+        subdirs = sorted(persist_dir.glob("*/index_meta.json"))
+        if subdirs:
+            meta = load_index_meta(subdirs[0].parent)
 
     if meta is None:
         return IndexStatusResponse(

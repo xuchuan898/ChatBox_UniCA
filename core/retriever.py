@@ -46,6 +46,7 @@ class HybridRetriever:
         query_expansion_enabled: bool = False,
         multi_turn_enabled: bool = True,
         max_history_turns: int = 5,
+        dynamic_topk_ratio: float = 0.1,
         debug: bool = False,
     ):
         self.vectordb = vectordb
@@ -64,6 +65,7 @@ class HybridRetriever:
         self.query_expansion_enabled = query_expansion_enabled
         self.multi_turn_enabled = multi_turn_enabled
         self.max_history_turns = max(0, int(max_history_turns))
+        self.dynamic_topk_ratio = dynamic_topk_ratio
         self.debug = debug
         self.retrieval_cache: dict[str, list[Document]] = {}
 
@@ -85,14 +87,13 @@ class HybridRetriever:
         return sorted(((by_id[key], val) for key, val in scores.items()), key=lambda x: x[1], reverse=True)
 
     @staticmethod
-    def _dynamic_top_k(reranked_scored: list[tuple[Document, float]]) -> int:
+    def _dynamic_top_k(reranked_scored: list[tuple[Document, float]], max_k: int = 8, ratio: float = 0.1) -> int:
         if not reranked_scored:
             return 0
-        base = min(8, len(reranked_scored))
-        cutoff = reranked_scored[base - 1][1]
-        tail = [s for _, s in reranked_scored[base : min(len(reranked_scored), base + 6)]]
-        close = sum(1 for s in tail if (cutoff - s) <= 0.03)
-        return min(len(reranked_scored), base + close)
+        max_score = reranked_scored[0][1]
+        threshold = max_score * ratio
+        count = sum(1 for _, s in reranked_scored if s >= threshold)
+        return min(count, max_k, len(reranked_scored))
 
     def _normalize_history(
         self,
@@ -128,6 +129,7 @@ class HybridRetriever:
         history: Optional[List[Dict[str, str]]] = None,
         chat_history: Optional[List[Dict[str, str]]] = None,
         rewritten: bool = False,
+        top_n: int = 8,
     ) -> list[Document]:
         t0 = time.perf_counter()
         normalized_history = self._normalize_history(history=history, chat_history=chat_history)
@@ -182,7 +184,7 @@ class HybridRetriever:
         )
         rerank_sec = time.perf_counter() - t_rerank
         reranked_scored = [(doc, score) for doc, score, _, _ in reranked]
-        top_k = self._dynamic_top_k(reranked_scored)
+        top_k = self._dynamic_top_k(reranked_scored, max_k=top_n, ratio=self.dynamic_topk_ratio)
         docs = [doc for doc, _ in reranked_scored[:top_k]]
         self.retrieval_cache[cache_key] = docs
         if self.debug:

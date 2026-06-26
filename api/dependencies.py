@@ -9,7 +9,7 @@ from typing import Any
 
 from core.config_loader import load_config
 from core.generator import AnswerGenerator
-from core.indexer import ensure_index, load_index_meta
+from core.indexer import ensure_index, load_index_meta, load_persisted_index
 from core.query_expander import (
     OllamaRewriter,
     PassthroughRewriter,
@@ -44,13 +44,21 @@ class AppState:
 
         # ---------- Index Loading ----------
         doc_file = cfg.get("ragas_experiment", {}).get("doc_file", "./docs/chroma/master.md")
-        # Load if meta exists, otherwise build
-        meta = load_index_meta(persist_dir)
-        if meta:
-            logger.info("Loading persisted index from %s", persist_dir)
-            from core.indexer import load_persisted_index
 
-            state = load_persisted_index(persist_dir)
+        # Try loading meta from the base persist_dir first, then search subdirectories
+        meta = load_index_meta(persist_dir)
+        actual_persist_dir = persist_dir
+
+        if meta is None:
+            subdirs = sorted(persist_dir.glob("*/index_meta.json"))
+            if subdirs:
+                actual_persist_dir = subdirs[0].parent
+                meta = load_index_meta(actual_persist_dir)
+                logger.info("Found index in subdirectory: %s", actual_persist_dir)
+
+        if meta:
+            logger.info("Loading persisted index from %s", actual_persist_dir)
+            state = load_persisted_index(actual_persist_dir)
         else:
             logger.info("No index found, building from %s", doc_file)
             state = ensure_index(
@@ -106,6 +114,7 @@ class AppState:
             paraphrase_weight=retrieval_cfg.get("paraphrase_weight", 1.2),
             translation_weight=retrieval_cfg.get("translation_weight", 0.85),
             rerank_candidates=retrieval_cfg.get("rerank_candidates", 30),
+            dynamic_topk_ratio=retrieval_cfg.get("dynamic_topk_ratio", 0.1),
             query_expander=query_expander,
             query_expansion_enabled=qe_cfg.get("enabled", False),
             multi_turn_enabled=qe_cfg.get("multi_turn", {}).get("enabled", True),
