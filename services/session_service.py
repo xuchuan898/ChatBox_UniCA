@@ -39,6 +39,20 @@ class SessionService:
         self._sessions[sid] = session
         return session, sid
 
+    def list_sessions(self) -> list[dict]:
+        now = __import__("datetime").datetime.now()
+        results = []
+        for sid, sess in self._sessions.items():
+            history = sess.get_history()
+            last_activity = history[-1]["assistant"][:80] if history else ""
+            results.append({
+                "session_id": sid,
+                "turn_count": len(history),
+                "last_question": history[-1]["user"][:120] if history else "",
+                "last_activity_preview": last_activity,
+            })
+        return sorted(results, key=lambda x: x["session_id"])
+
     def clear(self, session_id: str) -> None:
         if session_id in self._sessions:
             del self._sessions[session_id]

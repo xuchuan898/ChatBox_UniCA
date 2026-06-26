@@ -6,10 +6,18 @@
       :status="indexStatus"
       :index-building="indexBuilding"
       :gen-model="genModel"
+      :available-docs="availableDocs"
+      :selected-docs="selectedDocs"
+      :docs-loading="docsLoading"
+      :docs-building="docsBuilding"
+      :docs-error="docsError"
       @refresh-status="refreshStatus"
       @new-session="handleNewSession"
       @clear-session="handleClearSession"
       @rebuild-index="handleRebuildIndex"
+      @doc-toggle="handleDocToggle"
+      @doc-apply="handleDocApply"
+      @doc-refresh="handleDocRefresh"
     />
 
     <ChatInterface
@@ -28,13 +36,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, markRaw } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import ChatInterface from './components/ChatInterface.vue'
 import ToastContainer from './components/ToastContainer.vue'
 import { useChat } from './composables/useChat.js'
 import { useToast } from './composables/useToast.js'
 import { getIndexStatus, rebuildIndex as apiRebuildIndex } from './api/index.js'
+import { listDocuments, selectDocuments } from './api/documents.js'
 import { get } from './api/client.js'
 
 const {
@@ -57,6 +66,13 @@ const online = ref(false)
 const indexStatus = reactive({})
 const indexBuilding = ref(false)
 const genModel = ref('')
+
+// Document selection state
+const availableDocs = ref([])
+const selectedDocs = ref(new Set())
+const docsLoading = ref(false)
+const docsBuilding = ref(false)
+const docsError = ref('')
 
 async function refreshStatus() {
   try {
@@ -94,7 +110,6 @@ async function handleRebuildIndex() {
     indexBuilding.value = true
     await apiRebuildIndex()
     success('Index rebuild started')
-    // Poll status until done
     const poll = setInterval(async () => {
       try {
         const idx = await getIndexStatus()
@@ -114,9 +129,59 @@ async function handleRebuildIndex() {
   }
 }
 
+// Document selection handlers
+async function handleDocRefresh() {
+  docsLoading.value = true
+  docsError.value = ''
+  try {
+    const docs = await listDocuments()
+    availableDocs.value = docs
+    // Load currently active selection
+    const active = await (await fetch('/api/v1/documents/active')).json()
+    if (active.selected && active.selected.length) {
+      selectedDocs.value = new Set(active.selected)
+    }
+  } catch (e) {
+    docsError.value = e.message
+  } finally {
+    docsLoading.value = false
+  }
+}
+
+function handleDocToggle(path) {
+  const next = new Set(selectedDocs.value)
+  if (next.has(path)) {
+    next.delete(path)
+  } else {
+    next.add(path)
+  }
+  selectedDocs.value = next
+}
+
+async function handleDocApply(paths) {
+  if (!paths.length) return
+  docsBuilding.value = true
+  docsError.value = ''
+  try {
+    const result = await selectDocuments(paths)
+    success(`Index built: ${result.doc_count} docs, ${result.chunk_count} chunks`)
+    // Update indexStatus with new counts
+    indexStatus.doc_count = result.doc_count
+    indexStatus.vector_count = result.chunk_count
+    indexStatus.is_ready = true
+  } catch (e) {
+    docsError.value = e.message
+    toastError('Doc selection failed: ' + e.message)
+  } finally {
+    docsBuilding.value = false
+  }
+}
+
 onMounted(async () => {
   await initSession()
   await refreshStatus()
+  // Load document list
+  await handleDocRefresh()
   // Try to read generation model from config endpoint
   try {
     const cfg = await get('/api/v1/config/')

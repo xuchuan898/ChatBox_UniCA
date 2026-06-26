@@ -264,13 +264,20 @@ curl -X POST http://localhost:8000/api/v1/chat/ \
 | `GET` | `/` | API info |
 | `POST` | `/api/v1/chat/` | Chat (JSON response) |
 | `POST` | `/api/v1/chat/stream` | Chat (SSE stream) |
+| `GET` | `/api/v1/sessions/list` | List all active sessions |
 | `POST` | `/api/v1/sessions/new` | Create a new session |
 | `DELETE` | `/api/v1/sessions/{session_id}` | Clear session memory |
+| `DELETE` | `/api/v1/sessions/` | Clear all sessions |
 | `GET` | `/api/v1/index/status` | Index status |
 | `POST` | `/api/v1/index/rebuild` | Rebuild index (async) |
 | `POST` | `/api/v1/index/update` | Incremental index update |
 | `GET` | `/api/v1/config/` | View config (sanitized) |
 | `PUT` | `/api/v1/config/` | Hot-reload config |
+| `POST` | `/api/v1/config/write` | Persist config to config.yaml |
+| `GET` | `/api/v1/documents/list` | List available documents in docs/chroma |
+| `GET` | `/api/v1/documents/active` | Get currently selected documents |
+| `POST` | `/api/v1/documents/select` | Select documents and rebuild index |
+| `GET` | `/api/v1/debug/retrieve` | Debug retrieval trace (no generation) |
 
 ---
 

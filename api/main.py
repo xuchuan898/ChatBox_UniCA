@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 
 from api.dependencies import get_app_state
 from api.exceptions import IndexNotReadyError, GenerationTimeoutError
-from api.routers import chat, config as config_router, index, sessions
+from api.routers import chat, config as config_router, debug, documents, index, sessions
 
 logging.basicConfig(
     level=logging.INFO,
@@ -168,6 +168,8 @@ def create_app() -> FastAPI:
     app.include_router(sessions.router)
     app.include_router(index.router)
     app.include_router(config_router.router)
+    app.include_router(documents.router)
+    app.include_router(debug.router)
 
     # Global exception handlers
     @app.exception_handler(IndexNotReadyError)

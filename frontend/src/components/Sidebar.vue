@@ -26,6 +26,20 @@
     </div>
 
     <div class="sidebar__section">
+      <div class="sidebar__section-title">Knowledge Base</div>
+      <DocSelector
+        :docs="availableDocs"
+        :selected="selectedDocs"
+        :loading="docsLoading"
+        :building="docsBuilding"
+        :error="docsError"
+        @toggle="handleDocToggle"
+        @apply="handleDocApply"
+        @refresh="handleDocRefresh"
+      />
+    </div>
+
+    <div class="sidebar__section">
       <div class="sidebar__section-title">Index</div>
       <button class="sidebar-btn" @click="$emit('rebuild-index')" :disabled="indexBuilding">
         {{ indexBuilding ? 'Building...' : 'Rebuild Index' }}
@@ -52,17 +66,39 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import StatusCard from './StatusCard.vue'
+import DocSelector from './DocSelector.vue'
 
-defineProps({
+const props = defineProps({
   online: { type: Boolean, default: false },
   sessionId: { type: String, default: '' },
   status: { type: Object, default: () => ({}) },
   indexBuilding: { type: Boolean, default: false },
   genModel: { type: String, default: '' },
+  availableDocs: { type: Array, default: () => [] },
+  selectedDocs: { type: Set, default: () => new Set() },
+  docsLoading: { type: Boolean, default: false },
+  docsBuilding: { type: Boolean, default: false },
+  docsError: { type: String, default: '' },
 })
 
-defineEmits(['refresh-status', 'new-session', 'clear-session', 'rebuild-index'])
+const emit = defineEmits([
+  'refresh-status', 'new-session', 'clear-session', 'rebuild-index',
+  'doc-toggle', 'doc-apply', 'doc-refresh',
+])
+
+function handleDocToggle(path) {
+  emit('doc-toggle', path)
+}
+
+function handleDocApply(paths) {
+  emit('doc-apply', paths)
+}
+
+function handleDocRefresh() {
+  emit('doc-refresh')
+}
 
 function shortModel(name) {
   if (!name) return '-'

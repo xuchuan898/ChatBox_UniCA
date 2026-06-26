@@ -10,6 +10,14 @@ from services.session_service import SessionService
 router = APIRouter(prefix="/api/v1/sessions", tags=["Sessions"])
 
 
+@router.get("/list")
+async def list_sessions(
+    session_service: SessionService = Depends(get_session_service),
+) -> list[dict]:
+    """List all active sessions with metadata."""
+    return session_service.list_sessions()
+
+
 @router.post("/new")
 async def create_session(
     session_service: SessionService = Depends(get_session_service),
@@ -27,3 +35,12 @@ async def clear_session(
     """Clear a specific session's memory."""
     session_service.clear(session_id)
     return {"message": f"Session {session_id} cleared"}
+
+
+@router.delete("/")
+async def clear_all_sessions(
+    session_service: SessionService = Depends(get_session_service),
+) -> dict:
+    """Clear all sessions."""
+    session_service.clear_all()
+    return {"message": "All sessions cleared"}
