@@ -17,12 +17,12 @@
 
     <div class="sidebar__section">
       <div class="sidebar__section-title">Sessions</div>
-      <button class="sidebar-btn sidebar-btn--primary" @click="$emit('new-session')">
-        + New Session
-      </button>
-      <button class="sidebar-btn sidebar-btn--danger" @click="$emit('clear-session')">
-        Clear Memory
-      </button>
+      <SessionList
+        :active-session-id="sessionId"
+        @new-session="$emit('new-session')"
+        @switch-session="$emit('switch-session', $event)"
+        @sessions-cleared="$emit('sessions-cleared')"
+      />
     </div>
 
     <div class="sidebar__section">
@@ -62,6 +62,10 @@
         </div>
       </div>
     </div>
+
+    <div class="sidebar__section">
+      <DebugRetrieval />
+    </div>
   </aside>
 </template>
 
@@ -69,6 +73,8 @@
 import { ref } from 'vue'
 import StatusCard from './StatusCard.vue'
 import DocSelector from './DocSelector.vue'
+import SessionList from './SessionList.vue'
+import DebugRetrieval from './DebugRetrieval.vue'
 
 const props = defineProps({
   online: { type: Boolean, default: false },
@@ -86,6 +92,7 @@ const props = defineProps({
 const emit = defineEmits([
   'refresh-status', 'new-session', 'clear-session', 'rebuild-index',
   'doc-toggle', 'doc-apply', 'doc-refresh',
+  'switch-session', 'sessions-cleared',
 ])
 
 function handleDocToggle(path) {

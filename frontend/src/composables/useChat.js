@@ -156,6 +156,12 @@ export function useChat() {
     }
   }
 
+  async function switchToSession(sid) {
+    sessionId.value = sid
+    messages.splice(0, messages.length)
+    error.value = null
+  }
+
   function clearMessages() {
     messages.splice(0, messages.length)
   }
@@ -175,5 +181,6 @@ export function useChat() {
     clearCurrentSession,
     clearMessages,
     initSession,
+    switchToSession,
   }
 }

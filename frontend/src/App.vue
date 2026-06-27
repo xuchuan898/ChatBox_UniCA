@@ -18,6 +18,8 @@
       @doc-toggle="handleDocToggle"
       @doc-apply="handleDocApply"
       @doc-refresh="handleDocRefresh"
+      @switch-session="handleSwitchSession"
+      @sessions-cleared="handleSessionsCleared"
     />
 
     <ChatInterface
@@ -43,7 +45,7 @@ import ToastContainer from './components/ToastContainer.vue'
 import { useChat } from './composables/useChat.js'
 import { useToast } from './composables/useToast.js'
 import { getIndexStatus, rebuildIndex as apiRebuildIndex } from './api/index.js'
-import { listDocuments, selectDocuments } from './api/documents.js'
+import { listDocuments, getActiveDocuments, selectDocuments } from './api/documents.js'
 import { get } from './api/client.js'
 
 const {
@@ -57,6 +59,7 @@ const {
   newSession,
   clearCurrentSession,
   initSession,
+  switchToSession,
 } = useChat()
 
 const { info, success, error: toastError } = useToast()
@@ -137,7 +140,7 @@ async function handleDocRefresh() {
     const docs = await listDocuments()
     availableDocs.value = docs
     // Load currently active selection
-    const active = await (await fetch('/api/v1/documents/active')).json()
+    const active = await getActiveDocuments()
     if (active.selected && active.selected.length) {
       selectedDocs.value = new Set(active.selected)
     }
@@ -175,6 +178,15 @@ async function handleDocApply(paths) {
   } finally {
     docsBuilding.value = false
   }
+}
+
+function handleSwitchSession(sessionId) {
+  switchToSession(sessionId)
+  info('Switched to session')
+}
+
+function handleSessionsCleared() {
+  initSession()
 }
 
 onMounted(async () => {
