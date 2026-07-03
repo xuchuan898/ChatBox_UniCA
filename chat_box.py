@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rerank-alpha", type=float, default=0.5)
     parser.add_argument("--rerank-candidates", type=int, default=30)
     parser.add_argument("--enable-multi-variant-rerank", type=str, default=None)
+    parser.add_argument("--disable-rerank", type=str, default=None)
     parser.add_argument("--force-rebuild", action="store_true")
     parser.add_argument("--config", type=str, default="config.yaml")
     parser.add_argument("--enable-query-expansion", type=str, default=None)
@@ -228,6 +229,7 @@ def main() -> None:
         "retrieval.rerank_alpha": args.rerank_alpha,
         "retrieval.rerank_candidates": args.rerank_candidates,
         "retrieval.multi_variant_rerank_enabled": _parse_bool(args.enable_multi_variant_rerank),
+        "retrieval.disable_rerank": _parse_bool(args.disable_rerank),
         "query_expansion.enabled": _parse_bool(args.enable_query_expansion),
         "query_expansion.model_name": args.expansion_model,
         "query_expansion.num_paraphrases": args.expansion_paraphrases,
@@ -275,7 +277,8 @@ def main() -> None:
         print(
             f"[DEBUG][BOOT] rerank multi_variant_enabled="
             f"{bool(config['retrieval'].get('multi_variant_rerank_enabled', False))} "
-            f"alpha={config['retrieval']['rerank_alpha']}"
+            f"alpha={config['retrieval']['rerank_alpha']} "
+            f"disabled={bool(config['retrieval'].get('disable_rerank', False))}"
         )
     reranker = CrossEncoderReranker(
         alpha=float(config["retrieval"]["rerank_alpha"]),
@@ -297,6 +300,7 @@ def main() -> None:
         query_expansion_enabled=bool(config["query_expansion"]["enabled"]),
         multi_turn_enabled=bool(config["query_expansion"].get("multi_turn", {}).get("enabled", True)),
         max_history_turns=int(config["query_expansion"].get("multi_turn", {}).get("max_history_turns", 5)),
+        disable_rerank=bool(config["retrieval"].get("disable_rerank", False)),
         debug=args.debug,
     )
     generator = AnswerGenerator(

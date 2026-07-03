@@ -32,10 +32,19 @@ class CrossEncoderReranker:
         top_n: int = 8,
         return_scores: bool = False,
         query_variants: list[str] | None = None,
+        skip: bool = False,
     ):
-        """Return reranked docs or detailed scores."""
+        """Return reranked docs or detailed scores.
+
+        When skip=True, bypass the cross-encoder and return docs as-is with default scores.
+        Useful for ablation experiments comparing with vs. without reranking.
+        """
         if not docs:
             return []
+        if skip:
+            if return_scores:
+                return [(doc, 0.0, 0.0, 0.0) for doc in docs[:top_n]]
+            return docs[:top_n]
         variants = [query]
         if self.multi_variant_enabled and query_variants:
             # Preserve order and remove duplicates.

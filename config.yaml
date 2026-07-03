@@ -12,6 +12,7 @@ retrieval:
   dynamic_topk_ratio: 0.5
   rerank_alpha: 0.5
   multi_variant_rerank_enabled: false
+  disable_rerank: false
 
 query_expansion:
   enabled: true

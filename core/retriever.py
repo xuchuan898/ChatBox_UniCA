@@ -47,6 +47,7 @@ class HybridRetriever:
         multi_turn_enabled: bool = True,
         max_history_turns: int = 5,
         dynamic_topk_ratio: float = 0.1,
+        disable_rerank: bool = False,
         debug: bool = False,
     ):
         self.vectordb = vectordb
@@ -66,6 +67,7 @@ class HybridRetriever:
         self.multi_turn_enabled = multi_turn_enabled
         self.max_history_turns = max(0, int(max_history_turns))
         self.dynamic_topk_ratio = dynamic_topk_ratio
+        self.disable_rerank = disable_rerank
         self.debug = debug
         self.retrieval_cache: dict[str, list[Document]] = {}
 
@@ -175,15 +177,22 @@ class HybridRetriever:
             rerank_mode = "multi_variant" if getattr(self.reranker, "multi_variant_enabled", False) else "single_query"
             print(f"[DEBUG][RERANK] mode={rerank_mode} variants_for_rerank={len(queries) if rerank_mode == 'multi_variant' else 1}")
         t_rerank = time.perf_counter()
-        reranked = self.reranker.rerank(
-            question,
-            base_docs,
-            top_n=len(base_docs),
-            return_scores=True,
-            query_variants=queries,
-        )
-        rerank_sec = time.perf_counter() - t_rerank
-        reranked_scored = [(doc, score) for doc, score, _, _ in reranked]
+        if self.disable_rerank:
+            # Ablation: skip cross-encoder rerank, use RRF-fused results directly
+            reranked_scored = [(doc, score) for doc, score in merged[:top_n]]
+            rerank_sec = time.perf_counter() - t_rerank
+            if self.debug:
+                print(f"[DEBUG][RERANK] disabled=true — using RRF fusion directly")
+        else:
+            reranked = self.reranker.rerank(
+                question,
+                base_docs,
+                top_n=len(base_docs),
+                return_scores=True,
+                query_variants=queries,
+            )
+            rerank_sec = time.perf_counter() - t_rerank
+            reranked_scored = [(doc, score) for doc, score, _, _ in reranked]
         top_k = self._dynamic_top_k(reranked_scored, max_k=top_n, ratio=self.dynamic_topk_ratio)
         docs = [doc for doc, _ in reranked_scored[:top_k]]
         self.retrieval_cache[cache_key] = docs

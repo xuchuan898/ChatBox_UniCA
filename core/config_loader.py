@@ -20,6 +20,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "rerank_candidates": 30,
         "rerank_alpha": 0.5,
         "multi_variant_rerank_enabled": False,
+        "disable_rerank": False,
     },
     "query_expansion": {
         "enabled": True,

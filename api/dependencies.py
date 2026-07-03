@@ -115,6 +115,7 @@ class AppState:
             translation_weight=retrieval_cfg.get("translation_weight", 0.85),
             rerank_candidates=retrieval_cfg.get("rerank_candidates", 30),
             dynamic_topk_ratio=retrieval_cfg.get("dynamic_topk_ratio", 0.1),
+            disable_rerank=retrieval_cfg.get("disable_rerank", False),
             query_expander=query_expander,
             query_expansion_enabled=qe_cfg.get("enabled", False),
             multi_turn_enabled=qe_cfg.get("multi_turn", {}).get("enabled", True),

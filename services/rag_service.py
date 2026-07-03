@@ -94,6 +94,7 @@ class RAGService:
         self.retriever.weight_bm25 = retrieval_cfg.get("weight_bm25", 0.75)
         self.retriever.rerank_candidates = retrieval_cfg.get("rerank_candidates", 30)
         self.retriever.dynamic_topk_ratio = retrieval_cfg.get("dynamic_topk_ratio", 0.1)
+        self.retriever.disable_rerank = retrieval_cfg.get("disable_rerank", False)
         self.reranker.alpha = retrieval_cfg.get("rerank_alpha", 0.5)
 
         docs = await asyncio.to_thread(self.retriever.retrieve, request.query, history)
@@ -156,6 +157,7 @@ class RAGService:
         self.retriever.weight_bm25 = retrieval_cfg.get("weight_bm25", 0.75)
         self.retriever.rerank_candidates = retrieval_cfg.get("rerank_candidates", 30)
         self.retriever.dynamic_topk_ratio = retrieval_cfg.get("dynamic_topk_ratio", 0.1)
+        self.retriever.disable_rerank = retrieval_cfg.get("disable_rerank", False)
         self.reranker.alpha = retrieval_cfg.get("rerank_alpha", 0.5)
 
         # 3) Hybrid retrieval (reranking + dynamic top-k is done inside)
