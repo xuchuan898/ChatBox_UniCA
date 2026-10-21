@@ -16,10 +16,11 @@ from core.config_loader import apply_cli_overrides, load_config
 from core.conversation_memory import ConversationMemory
 from core.generator import AnswerGenerator
 from core.indexer import ensure_index
-from core.query_expander import OllamaRewriter, PassthroughRewriter, QueryExpander, QwenRewriter
+from core.query_expander import PassthroughRewriter, QueryExpander
 from core.reranker import CrossEncoderReranker
 from core.retriever import HybridRetriever
 from core.semantic_cache import SemanticCache
+from services.model_providers import build_generator, build_reranker, build_query_expander
 
 
 URL_SOURCE_FILE = "./docs/chroma/source_urls.txt"
@@ -44,6 +45,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enable-multi-variant-rerank", type=str, default=None)
     parser.add_argument("--force-rebuild", action="store_true")
     parser.add_argument("--config", type=str, default="config.yaml")
+    parser.add_argument("--generation-provider", choices=["ollama", "albert"], default=None)
+    parser.add_argument("--rerank-provider", choices=["local", "albert"], default=None)
+    parser.add_argument("--expansion-rewriter", choices=["ollama", "albert", "passthrough", "qwen"], default=None)
+    parser.add_argument("--albert-generation-model", default=None)
+    parser.add_argument("--albert-rerank-model", default=None)
+    parser.add_argument("--albert-expansion-model", default=None)
     parser.add_argument("--enable-query-expansion", type=str, default=None)
     parser.add_argument("--expansion-model", type=str, default=None)
     parser.add_argument("--expansion-paraphrases", type=int, default=None)
@@ -119,21 +126,7 @@ class _CompatQAChain:
 
 
 def _build_query_expander(config: dict[str, Any]) -> QueryExpander:
-    qe_cfg = config["query_expansion"]
-    rewriter_type = qe_cfg.get("rewriter", "qwen")
-    if rewriter_type == "passthrough":
-        rewriter = PassthroughRewriter()
-    elif rewriter_type == "ollama":
-        rewriter = OllamaRewriter(model_name=qe_cfg.get("model_name", "gemma3:4b"))
-    else:
-        rewriter = QwenRewriter()
-    return QueryExpander(
-        rewriter=rewriter,
-        num_paraphrases=int(qe_cfg.get("num_paraphrases", 1)),
-        add_translation=bool(qe_cfg.get("add_translation", True)),
-        source_lang=str(qe_cfg.get("source_lang", "auto")),
-        target_lang_for_translation=str(qe_cfg.get("target_lang_for_translation", "auto")),
-    )
+    return build_query_expander(config)
 
 
 def chatbox(
@@ -222,6 +215,12 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     overrides = {
+        "generation.provider": args.generation_provider,
+        "retrieval.rerank_provider": args.rerank_provider,
+        "query_expansion.rewriter": args.expansion_rewriter,
+        "generation.albert_model_name": args.albert_generation_model,
+        "retrieval.albert_rerank_model_name": args.albert_rerank_model,
+        "query_expansion.albert_model_name": args.albert_expansion_model,
         "indexing.force_rebuild": args.force_rebuild if args.force_rebuild else None,
         "retrieval.weight_vec": args.weight_vec,
         "retrieval.weight_bm25": args.weight_bm25,
@@ -277,10 +276,7 @@ def main() -> None:
             f"{bool(config['retrieval'].get('multi_variant_rerank_enabled', False))} "
             f"alpha={config['retrieval']['rerank_alpha']}"
         )
-    reranker = CrossEncoderReranker(
-        alpha=float(config["retrieval"]["rerank_alpha"]),
-        multi_variant_enabled=bool(config["retrieval"].get("multi_variant_rerank_enabled", False)),
-    )
+    reranker = build_reranker(config)
     retriever = HybridRetriever(
         vectordb=state["vectordb"],
         bm25_index=state["bm25_index"],
@@ -299,11 +295,7 @@ def main() -> None:
         max_history_turns=int(config["query_expansion"].get("multi_turn", {}).get("max_history_turns", 5)),
         debug=args.debug,
     )
-    generator = AnswerGenerator(
-        model_name=config["generation"]["model_name"],
-        temperature=float(config["generation"]["temperature"]),
-        num_predict=int(config["generation"]["num_predict"]),
-    )
+    generator = build_generator(config)
     cache = None
     if config["cache"]["enabled"]:
         cache = SemanticCache(threshold=float(config["cache"]["threshold"]), ttl=int(config["cache"]["ttl"]), debug=args.debug)

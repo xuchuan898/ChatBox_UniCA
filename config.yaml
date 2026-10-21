@@ -2,7 +2,17 @@ indexing:
   persist_dir: "./index_store"
   force_rebuild: false
 
+# Credentials: environment variable first, then the private local key file.
+albert:
+  base_url: "https://albert.api.etalab.gouv.fr/v1"
+  api_key_env: "ALBERT_API_KEY"
+  api_key_file: "api_albert.txt"  # Relative to the project directory; ignored by Git
+  timeout: 120
+
 retrieval:
+  rerank_provider: "albert"  # local | albert
+  rerank_model_name: "nvidia/llama-nemotron-rerank-1b-v2"
+  albert_rerank_model_name: "openweight-rerank"
   weight_vec: 1.25
   weight_bm25: 0.75
   original_weight: 1.0
@@ -15,7 +25,8 @@ retrieval:
 
 query_expansion:
   enabled: true
-  rewriter: "ollama"
+  rewriter: "albert"  # ollama | albert | passthrough | qwen
+  albert_model_name: "openweight-medium"
   model_name: "qwen2.5:32b"
   num_paraphrases: 1
   add_translation: true
@@ -36,6 +47,8 @@ memory:
   long_term_enabled: false
 
 generation:
+  provider: "albert"  # ollama | albert
+  albert_model_name: "openweight-medium"
   model_name: "qwen2.5:32b"
   temperature: 0.0
   num_predict: 256

@@ -10,15 +10,11 @@ from typing import Any
 from core.config_loader import load_config
 from core.generator import AnswerGenerator
 from core.indexer import ensure_index, load_index_meta, load_persisted_index
-from core.query_expander import (
-    OllamaRewriter,
-    PassthroughRewriter,
-    QueryExpander,
-)
 from core.reranker import CrossEncoderReranker
 from core.retriever import HybridRetriever
 from core.semantic_cache import SemanticCache
 from services.session_service import SessionService
+from services.model_providers import build_generator, build_reranker, build_query_expander
 
 logger = logging.getLogger(__name__)
 
@@ -78,28 +74,11 @@ class AppState:
 
         # ---------- Reranker ----------
         retrieval_cfg = cfg.get("retrieval", {})
-        self.reranker = CrossEncoderReranker(
-            alpha=retrieval_cfg.get("rerank_alpha", 0.5),
-            multi_variant_enabled=retrieval_cfg.get("multi_variant_rerank_enabled", False),
-        )
+        self.reranker = build_reranker(cfg)
 
         # ---------- Query Expander ----------
         qe_cfg = cfg.get("query_expansion", {})
-        rewriter_type = qe_cfg.get("rewriter", "ollama")
-        if rewriter_type == "ollama":
-            rewriter = OllamaRewriter(
-                model_name=qe_cfg.get("model_name", "qwen2.5:32b"),
-            )
-        else:
-            rewriter = PassthroughRewriter()
-
-        query_expander = QueryExpander(
-            rewriter=rewriter,
-            num_paraphrases=qe_cfg.get("num_paraphrases", 1),
-            add_translation=qe_cfg.get("add_translation", True),
-            source_lang=qe_cfg.get("source_lang", "auto"),
-            target_lang_for_translation=qe_cfg.get("target_lang_for_translation", "auto"),
-        )
+        query_expander = build_query_expander(cfg)
 
         # ---------- Retriever ----------
         self.retriever = HybridRetriever(
@@ -122,12 +101,7 @@ class AppState:
         )
 
         # ---------- Generator ----------
-        gen_cfg = cfg.get("generation", {})
-        self.generator = AnswerGenerator(
-            model_name=gen_cfg.get("model_name", "qwen2.5:32b"),
-            temperature=gen_cfg.get("temperature", 0.0),
-            num_predict=gen_cfg.get("num_predict", 256),
-        )
+        self.generator = build_generator(cfg)
 
         # ---------- Semantic Cache ----------
         cache_cfg = cfg.get("cache", {})

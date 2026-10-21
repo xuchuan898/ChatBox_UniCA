@@ -44,3 +44,18 @@
 
 !frontend/
 !frontend/**
+# Albert credentials and local artifacts must never be committed.
+/api_albert.txt
+.env
+.env.*
+!.env.example
+!frontend/.env.example
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+frontend/node_modules/
+frontend/dist/
+index_store/
+*.safetensors
+!README_OLLAMA.md

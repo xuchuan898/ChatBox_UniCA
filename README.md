@@ -1,587 +1,177 @@
+# ChatBox_UniCA - Albert API edition
 
-# Chatbox Project
+Branch: `develop_api_albert`
 
-Industrialized local RAG chatbot for Université Côte d'Azur CS Master Q&A.
+RAG chatbot for Universite Cote d'Azur CS Master questions. This branch uses
+Albert API for answer generation, document reranking, and query rewriting by
+default. It provides a command-line chatbot, a FastAPI backend, and a Vue 3 chat UI.
 
-## Key Upgrades
+The original project documentation, including Ollama and remote GPU/tunnel setup,
+is preserved in [README_OLLAMA.md](README_OLLAMA.md). Follow the instructions below
+for this branch; its provider defaults differ from the original version.
 
-- Persistent indexing (Chroma + BM25) with hash validation and rebuild control.
-- Modular pipeline (document_loader, chunker, indexer, retriever, reranker, generator).
-- Query expansion module (`core/query_expander.py`) with pluggable rewriter:
-  - `OllamaRewriter` (paraphrase + translation)
-  - `PassthroughRewriter` (ablation baseline)
-- Semantic cache (`core/semantic_cache.py`) with cosine threshold + TTL.
-- Conversation memory (`core/conversation_memory.py`) for short/long-term context.
-- Centralized configuration (`config.yaml`) with priority:
-  - CLI > config.yaml > default values.
+## How it works
 
----
+1. Load and split source documents, then persist a Chroma vector index and BM25 index.
+2. Optionally rewrite/translate the question using Albert, including conversation history.
+3. Retrieve candidate chunks locally using embeddings and BM25.
+4. Send the question and candidate chunks to Albert's reranking endpoint.
+5. Select the highest-ranked context and ask Albert to generate a grounded answer.
 
-## Install
+| Stage | Default model requested | Runs on |
+| --- | --- | --- |
+| Document/question embeddings | `intfloat/multilingual-e5-base` | Your machine/server |
+| Candidate search | Chroma + BM25 | Your machine/server |
+| Reranking | `openweight-rerank` | Albert API |
+| Answer generation | `openweight-medium` | Albert API |
+| Question rewriting/translation | `openweight-medium` | Albert API |
 
-```bash
-pip install langchain langchain-community langchain-huggingface langchain-text-splitters langchain-ollama langchain-core chromadb sentence-transformers bm25s mammoth pyyaml
-```
+Albert model names are aliases and availability depends on your account. See the
+[Albert API reference](https://albert.api.etalab.gouv.fr/reference) and authenticated
+`GET /v1/models` for available models. No Ollama server or Ollama model pull is
+needed with this branch's default configuration. Local embeddings still download
+model weights on first use; a GPU is optional for that step. Questions and selected
+chunk text are sent to Albert for inference.
 
-Optional (PDF conversion):
+## 1. Get the branch and install dependencies
 
-```bash
-pip install docling
-```
-
-Ensure Ollama model exists:
-
-```bash
-ollama pull gemma3:4b
-```
-
----
-
-## Build / Load Index
-
-Offline build:
+Use Python 3.10+ (Python 3.11 recommended) and Git. Node.js/npm are needed only for
+the optional frontend.
 
 ```bash
-python build_index.py --doc-file ./docs/chroma/master.md
+git clone --branch develop_api_albert https://github.com/xuchuan898/ChatBox_UniCA.git
+cd ChatBox_UniCA
+python -m venv .venv
 ```
 
-Runtime auto-logic in `chat_box.py`:
+Activate the virtual environment in PowerShell:
 
-- meta exists + hash matches => load
-- else => rebuild
-- force via `--force-rebuild`
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
----
+Or on Linux/macOS:
 
-## Usage
+```bash
+source .venv/bin/activate
+```
 
-Single question:
+Install the backend dependencies:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Albert uses Python's standard HTTP library; no additional Albert SDK is required.
+Ollama libraries remain dependencies to support the alternative provider. PDF
+conversion with Docling is optional; install `docling` if your input requires it.
+Run all backend commands from the repository root so `config.yaml` and document
+paths resolve correctly.
+
+## 2. Configure your Albert API key
+
+The key is not included in this repository. Choose one method:
+
+**Environment variable (PowerShell):**
+
+```powershell
+$env:ALBERT_API_KEY = "YOUR_ALBERT_API_KEY"
+```
+
+**Environment variable (Linux/macOS):**
+
+```bash
+export ALBERT_API_KEY="YOUR_ALBERT_API_KEY"
+```
+
+**Private local file:** create `api_albert.txt` in the repository root, containing
+only your API key. This file is explicitly ignored by Git. The default config
+points to it, and relative key file paths resolve from the repository directory.
+
+An environment variable takes priority over the file. Set the environment variable
+in each terminal used to launch a backend, or use the local file for both CLI and
+API startup. A `.env` file is not loaded automatically. Keep the key on the backend;
+never put it in a `VITE_` frontend setting.
+
+## 3. Launch the command-line chatbot
+
+Ask one question:
 
 ```bash
 python chat_box.py --doc-file ./docs/chroma/master.md -q "What are M1 prerequisites?"
 ```
 
-Batch questions:
+Start an interactive conversation:
 
 ```bash
-python chat_box.py --doc-file ./docs/chroma/master.md --question-file ./questions/questions_batch_example.txt --answer-file ./docs/chroma/answers.txt
+python chat_box.py --doc-file ./docs/chroma/master.md
 ```
 
-Enable query expansion controls:
-
-```bash
-python chat_box.py --enable-query-expansion true --expansion-model gemma3:4b --expansion-paraphrases 1 --expansion-add-translation true --expansion-source-lang auto
-```
-
-Enable cache controls:
-
-```bash
-python chat_box.py --enable-cache true --cache-threshold 0.92 --cache-ttl 86400
-```
-
-Enable memory controls:
-
-```bash
-python chat_box.py --enable-memory true --memory-rounds 5
-```
-
----
-
-## Project Structure
-
-```
-chat_box.py          # CLI orchestrator (memory -> cache -> expansion -> retrieve -> rerank -> generate)
-build_index.py       # offline persistent index build
-core/
-├── config_loader.py         # config loading + CLI override merge
-├── document_loader.py       # MD/TXT/PDF/DOCX/URL loading
-├── chunker.py               # adaptive chunking
-├── indexer.py               # build/load/ensure persistent Chroma + BM25
-├── retriever.py             # hybrid retrieval + RRF + expansion aggregation
-├── reranker.py              # cross-encoder dual-score rerank
-├── generator.py             # constrained answer generation prompt
-├── query_expander.py        # query rewrite/translation + language detection
-├── semantic_cache.py        # semantic answer cache
-├── conversation_memory.py   # short/long-term memory
-├── evaluator.py             # context recall helper + RAGAS placeholder
-experiments/                 # original experiment scripts (kept compatible)
-```
-
----
-
-## Notes on Compatibility
-
-- Original `chat_box.py` exported APIs (`prepare_data`, `chatbox`) are preserved for `experiments/run_doc_matrix_experiment.py`.
-- Existing CLI arguments remain valid; new features are opt-in or config-driven.
-
----
-
-# ChatBox_UniCA API Server
-
-FastAPI-based RAG backend service providing RESTful and SSE streaming endpoints.
-
-## Prerequisites
-
-- Python 3.10+
-- Conda environment (recommended) or system Python:
-
-```bash
-module load conda                    # HPC cluster only
-conda activate /path/to/chatbox_env  # or: conda activate chatbox
-```
-
-- Ollama binary in PATH or at `~/ollama/bin/ollama`:
-
-```bash
-export PATH=$PATH:~/ollama/bin
-ollama pull qwen2.5:32b
-```
-
-- Install Python dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## Index Building
-
-Build the index before the first run (skipped if metadata already exists under `./index_store`):
+Type `exit` to quit. Missing or stale indexes are built automatically. Optionally
+build the index in advance:
 
 ```bash
 python build_index.py --doc-file ./docs/chroma/master.md --persist-dir ./index_store
 ```
 
----
-
-## Starting the API Server
-
-The server will auto-start Ollama if it is not already running (looks for the binary in PATH and `~/ollama/bin/`), then ensure the configured model exists, and finally load indexes and models.
-
-> **Note**: `uvicorn --factory` may cause Segmentation fault due to CUDA/torch fork conflicts. Use the Python‑script method below to avoid this issue.
+Process a question file, using your own existing input path:
 
 ```bash
-python -c "from api.main import create_app; app = create_app(); import uvicorn; uvicorn.run(app, host='0.0.0.0', port=8000)"
+python chat_box.py --question-file ./my_questions.txt --answer-file ./answers.txt
 ```
 
-Or set `USER_AGENT` to suppress the warning:
+Use one question per line ending in `?`. `--debug` prints retrieval details and
+prompts, so use it when you need to inspect the context sent to the model.
+
+## 4. Launch the API server
+
+In the activated Python environment with the key configured:
 
 ```bash
-USER_AGENT=MyBot/1.0 python -c "from api.main import create_app; app = create_app(); import uvicorn; uvicorn.run(app, host='0.0.0.0', port=8000)"
+python -c "from api.main import create_app; import uvicorn; uvicorn.run(create_app(), host='127.0.0.1', port=8000)"
 ```
 
-First startup loads models and indexes, which may take 10–30 seconds. Ollama auto-start waits up to 30s.
+Use one worker to avoid loading multiple copies of the embedding model. The API
+loads/builds the index on startup and warms up retrieval. Initialization may take
+longer on first use because embeddings need to download. Ollama startup and model
+pulling are skipped when generation and enabled query rewriting use Albert.
 
----
+- Interactive API documentation: <http://127.0.0.1:8000/docs>
+- Health check: <http://127.0.0.1:8000/health>
 
-## Environment Variables (all optional)
+Example request in PowerShell:
 
-| Variable | Default | Description |
-| :--- | :--- | :--- |
-| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama server URL |
-| `OLLAMA_BIN_DIR` | `~/ollama/bin` | Directory to find ollama binary |
-| `OLLAMA_LOG_FILE` | `~/ollama/ollama.log` | Path to Ollama server log |
-| `OLLAMA_MODEL` | (not set) | Model to pull on startup (e.g. `qwen2.5:32b`) |
-| `OLLAMA_STARTUP_WAIT` | `30` | Seconds to wait for Ollama to become ready |
+```powershell
+$body = @{query = "What are M1 prerequisites?"; session_id = "demo"} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/v1/chat/" -ContentType "application/json" -Body $body
+```
 
-If you prefer to manage Ollama yourself, start it before the API server and the auto-start logic will skip.
-
----
-
-## API Endpoints
-
-- Swagger Docs: `http://<server-ip>:8000/docs`
-- Health Check: `GET /health`
-
----
-
-## Testing with Apifox
-
-1. Open Apifox and create a new project.
-2. Go to **Import** → **Import Swagger/OpenAPI Document**.
-3. Enter URL: `http://<server-ip>:8000/openapi.json` — Apifox will parse all endpoints automatically.
-4. Set an environment variable `base_url` → `http://<server-ip>:8000` (or just use direct URLs).
-5. Now you can debug every endpoint from the Apifox interface.
-
----
-
-## Chat (JSON)
+Example request on Linux/macOS:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What are M1 prerequisites?", "session_id": "test-001"}'
-```
-
----
-
-## Chat (SSE Stream)
-
-```bash
-curl -X POST http://localhost:8000/api/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Explain the internship process"}'
-```
-
----
-
-## Index Status
-
-```bash
-curl http://localhost:8000/api/v1/index/status
-```
-
----
-
-## Dynamic Parameter Overrides
-
-Pass `overrides` in the request body to override config parameters at runtime:
-
-```bash
-curl -X POST http://localhost:8000/api/v1/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What is RAG?",
-    "session_id": "test-001",
-    "overrides": {
-      "top_k": 10,
-      "retrieval.weight_vec": 1.5,
-      "retrieval.weight_bm25": 0.5,
-      "retrieval.rerank_alpha": 0.3,
-      "retrieval.rerank_candidates": 20
-    }
-  }'
-```
-
----
-
-## Available Endpoints
-
-| Method | Path | Description |
-| :--- | :--- | :--- |
-| `GET` | `/health` | Health check |
-| `GET` | `/` | API info |
-| `POST` | `/api/v1/chat/` | Chat (JSON response) |
-| `POST` | `/api/v1/chat/stream` | Chat (SSE stream) |
-| `GET` | `/api/v1/sessions/list` | List all active sessions |
-| `POST` | `/api/v1/sessions/new` | Create a new session |
-| `DELETE` | `/api/v1/sessions/{session_id}` | Clear session memory |
-| `DELETE` | `/api/v1/sessions/` | Clear all sessions |
-| `GET` | `/api/v1/index/status` | Index status |
-| `POST` | `/api/v1/index/rebuild` | Rebuild index (async) |
-| `POST` | `/api/v1/index/update` | Incremental index update |
-| `GET` | `/api/v1/config/` | View config (sanitized) |
-| `PUT` | `/api/v1/config/` | Hot-reload config |
-| `POST` | `/api/v1/config/write` | Persist config to config.yaml |
-| `GET` | `/api/v1/documents/list` | List available documents in docs/chroma |
-| `GET` | `/api/v1/documents/active` | Get currently selected documents |
-| `POST` | `/api/v1/documents/select` | Select documents and rebuild index |
-| `GET` | `/api/v1/debug/retrieve` | Debug retrieval trace (no generation) |
-
----
-
-## Project Structure (added files)
-
-```
-api/
-├── models/
-│   ├── request.py       # Pydantic request models
-│   └── response.py      # Pydantic response models
-├── routers/
-│   ├── chat.py          # Chat endpoints (JSON + SSE)
-│   ├── sessions.py      # Session management
-│   ├── index.py         # Index status / rebuild / update
-│   └── config.py        # Config query and hot-reload
-├── dependencies.py      # Global singleton dependency injection
-├── exceptions.py        # Custom exceptions
-└── main.py              # FastAPI app factory
-
-services/
-├── session_service.py   # In-memory session pool
-└── rag_service.py       # Full RAG pipeline orchestration
-
-frontend/                # Vue 3 chat UI (see Frontend section below)
-```
-
----
-
-## Notes
-
-- **Port**: Ensure port 8000 is open in your firewall / security group.
-- **Single worker**: Use `--workers 1` to avoid duplicate model loading across processes.
-- **Cache**: Semantic cache is disabled by default. Enable it in `config.yaml` (`cache.enabled: true`).
-- **Immutable core**: Do not modify any code under `core/` or `experiments/`.
-
----
-
-## Remote Debugging & Common Issues (Grid'5000 Environment)
-
-### 1. Network Topology and Tunnel Setup
-
-**Login path**: `local machine → ${JUMP_HOST} → ${INTERMEDIATE_HOST} → ${TARGET_HOST} (compute node)`
-
-**Variable definitions**:
-
-| Variable | Meaning | Example Value | How to Obtain |
-| :--- | :--- | :--- | :--- |
-| `${USERNAME}` | Grid'5000 username | `bma` | Your login account |
-| `${JUMP_HOST}` | Jump host address | `access.grid5000.fr` | Fixed value |
-| `${INTERMEDIATE_HOST}` | Intermediate node (short name) | `sophia` | After logging into the jump host, run `hostname` or check the prompt |
-| `${TARGET_HOST}` | Compute node (short name) | `esterel34-1` | After logging into the intermediate node, run `hostname` |
-| `${LOCAL_PORT}` | Local mapped port | `8000` | Any available port; should match the remote port |
-| `${REMOTE_PORT}` | Remote service port | `8000` | The port used when starting FastAPI |
-
-**Generic tunnel command** (replace variables):
-
-```bash
-ssh -L ${LOCAL_PORT}:${TARGET_HOST}:${REMOTE_PORT} \
-    -o ProxyCommand="ssh -W %h:%p ${USERNAME}@${JUMP_HOST}" \
-    ${USERNAME}@${INTERMEDIATE_HOST}
-```
-
-**Example (with a real setup)**:
-
-Assume your username is `bma`, jump host is `access.grid5000.fr`, intermediate node is `sophia`, and compute node is `esterel34-1`:
-
-```bash
-ssh -L 8000:esterel34-1:8000  -o ProxyCommand="ssh -W %h:%p bma@access.grid5000.fr" bma@sophia
-```
-
-> **Replace `esterel34-1` and `sophia` with your actual node names.**
-
-- You will be asked for **two passwords** (jump host password + intermediate node password).
-- The terminal will hang — this is **normal**; it means the tunnel is active.
-- **Important**: Do not close this terminal window; it will break the tunnel.
-
-**Verify the tunnel** (in another local terminal):
-
-```bash
-curl http://127.0.0.1:${LOCAL_PORT}/health
-```
-
-Expected output:
-
-```json
-{"status":"ok","service":"ChatBox_UniCA"}
-```
-
-**How to find your node names**:
-
-```bash
-# 1. Log in to the jump host
-ssh ${USERNAME}@${JUMP_HOST}
-
-# 2. Jump to the intermediate node (e.g., sophia)
-ssh ${INTERMEDIATE_HOST}
-
-# 3. Check the current compute node name
-hostname
-# Example output: esterel34-1 (this is your ${TARGET_HOST})
-```
-
----
-
-### 2. Starting the Service (on the compute node ${TARGET_HOST})
-
-**Generic command**:
-
-```bash
-cd ~/ChatBox_UniCA
-conda activate chatbox
-python -c "from api.main import create_app; app = create_app(); import uvicorn; uvicorn.run(app, host='0.0.0.0', port=${REMOTE_PORT})"
-```
-
-**Example** (using port 8000):
-
-```bash
-cd ~/ChatBox_UniCA
-conda activate chatbox
-python -c "from api.main import create_app; app = create_app(); import uvicorn; uvicorn.run(app, host='0.0.0.0', port=8000)"
-```
-
-**Success indicator**:
-
-```
-INFO:     Uvicorn running on http://0.0.0.0:${REMOTE_PORT} (Press CTRL+C to quit)
-INFO:     Application startup complete.
-```
-
-**Important notes**:
-
-- You must bind to `host='0.0.0.0'`, otherwise the tunnel cannot forward traffic.
-- If you get a `Segmentation fault`, use the `python -c` method instead of `uvicorn --factory`.
-
----
-
-### 3. Apifox Configuration
-
-**Base URL (environment variable)**:
-
-```
-http://127.0.0.1:${LOCAL_PORT}
-```
-
-**Example** (port 8000):
-
-```
-http://127.0.0.1:8000
-```
-
-**Do NOT use**:
-
-- ❌ Public IP (firewall blocks it)
-- ❌ Jump host address (no service there)
-- ❌ SSH format like `bma@...`
-
-**Import API documentation**:
-
-1. Click **Import** → **OpenAPI/Swagger**.
-2. Enter URL: `http://127.0.0.1:${LOCAL_PORT}/openapi.json` (example: `http://127.0.0.1:8000/openapi.json`).
-3. All endpoints will be generated automatically.
-
-**Timeout setting**:
-
-- Apifox settings → timeout → set to at least `120000ms` (120 seconds).
-- Ollama inference can be slow (especially with large models).
-
----
-
-### 4. SSE Streaming Endpoint Notes
-
-- **Endpoint**: `POST /api/v1/chat/stream`
-- **View in Apifox**: After sending the request, look for the **"EventStream"** or **"SSE Preview"** tab in the **bottom-right** corner; do not look at the regular Response Body.
-- **Alternative**: Use `curl -N` in a local terminal:
-
-**Generic command**:
-
-```bash
-curl -N -X POST http://127.0.0.1:${LOCAL_PORT}/api/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Who is the M1 director?", "session_id": "test"}'
-```
-
-**Example** (port 8000):
-
-```bash
-curl -N -X POST http://127.0.0.1:8000/api/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Who is the M1 director?", "session_id": "test"}'
-```
-
----
-
-### 5. Troubleshooting Checklist
-
-| Symptom | Cause | Solution |
-| :--- | :--- | :--- |
-| `curl http://127.0.0.1:${LOCAL_PORT}/health` times out | Tunnel not established or service not running | Check that the tunnel terminal is still active; check the service terminal for `Uvicorn running` log |
-| Apifox shows `ETIMEDOUT` | Apifox is using a public IP or wrong address | Change to `http://127.0.0.1:${LOCAL_PORT}` (example: `http://127.0.0.1:8000`) |
-| Request hangs > 2 minutes | Ollama inference is slow (e.g., 32B model) | Add `"enable_query_expansion": false` in `overrides` to skip rewriting; or switch to a smaller model in `config.yaml` (e.g., `gemma3:4b`) |
-| No `EventStream` tab in Apifox | Apifox version does not support SSE | Use the browser Swagger UI at `http://127.0.0.1:${LOCAL_PORT}/docs` (example: `http://127.0.0.1:8000/docs`) |
-| `channel 3: open failed: connect failed: Connection refused` | Tunnel connected to wrong node (e.g., jump host instead of compute node) | Re‑run the tunnel command ensuring the target is `${TARGET_HOST}` (compute node) |
-| `Unrecognized keys in 'rope_scaling'` at startup | Model config compatibility warning | Ignore; it does not affect functionality |
-
----
-
-### 6. Quick Smoke Test for All Endpoints
-
-Run these commands in a local terminal (keep the tunnel running):
-
-**Generic commands (with variables)**:
-
-```bash
-# 1. Health check
-curl http://127.0.0.1:${LOCAL_PORT}/health
-
-# 2. Index status
-curl http://127.0.0.1:${LOCAL_PORT}/api/v1/index/status
-
-# 3. Chat (JSON)
-curl -X POST http://127.0.0.1:${LOCAL_PORT}/api/v1/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Who is the M1 director?", "session_id": "test"}'
-
-# 4. Streaming chat (SSE)
-curl -N -X POST http://127.0.0.1:${LOCAL_PORT}/api/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What courses in S1?", "session_id": "test"}'
-
-# 5. Create a new session
-curl -X POST http://127.0.0.1:${LOCAL_PORT}/api/v1/sessions/new
-```
-
-**Example (port 8000)**:
-
-```bash
-# Health check
-curl http://127.0.0.1:8000/health
-
-# Index status
-curl http://127.0.0.1:8000/api/v1/index/status
-
-# Chat
 curl -X POST http://127.0.0.1:8000/api/v1/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Who is the M1 director?", "session_id": "test"}'
-
-# Streaming
-curl -N -X POST http://127.0.0.1:8000/api/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What courses in S1?", "session_id": "test"}'
-
-# New session
-curl -X POST http://127.0.0.1:8000/api/v1/sessions/new
+  -H 'Content-Type: application/json' \
+  -d '{"query":"What are M1 prerequisites?","session_id":"demo"}'
 ```
 
----
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/v1/chat/` | Answer, sources, session ID, and elapsed time |
+| `POST /api/v1/chat/stream` | SSE progress events followed by the final answer |
+| `GET /api/v1/sessions/list` | List sessions |
+| `POST /api/v1/sessions/new` | Create a session |
+| `GET /api/v1/documents/list` | List available documents |
+| `POST /api/v1/documents/select` | Select documents and build/load their index |
+| `GET /api/v1/index/status` | Inspect the index |
+| `GET /api/v1/config/` | Inspect sanitized configuration |
 
-### 7. Common Maintenance Commands (run on the server)
+The SSE endpoint reports pipeline stages; it does not stream individual Albert
+generation tokens. See `/docs` for all endpoints and schemas.
 
-```bash
-# Check service process
-ps aux | grep uvicorn | grep -v grep
+## 5. Launch the optional web interface
 
-# Check if ${REMOTE_PORT} is listening
-netstat -tlnp | grep ${REMOTE_PORT}
-
-# Kill the service process (restart)
-kill -9 <PID>
-
-# Check Ollama status
-curl http://127.0.0.1:11434/api/tags
-
-# Test API locally (no tunnel needed)
-curl http://127.0.0.1:${REMOTE_PORT}/health
-```
-
-**Example** (port 8000):
-
-```bash
-netstat -tlnp | grep 8000
-curl http://127.0.0.1:8000/health
-```
-
----
-
-### 8. Placeholder Variable Reference Table
-
-| Variable | Meaning | Example Value (in this guide) | How to Obtain |
-| :--- | :--- | :--- | :--- |
-| `${USERNAME}` | Grid'5000 username | `bma` | Your login account |
-| `${JUMP_HOST}` | Jump host address | `access.grid5000.fr` | Fixed value |
-| `${INTERMEDIATE_HOST}` | Intermediate node (short name) | `sophia` | After logging into the jump host, run `hostname` or check the prompt |
-| `${TARGET_HOST}` | Compute node (short name) | `esterel34-1` | After logging into the intermediate node, run `hostname` |
-| `${LOCAL_PORT}` | Local mapped port | `8000` | Any available port; should match the remote port |
-| `${REMOTE_PORT}` | Remote service port | `8000` | The port used when starting FastAPI |
-
----
-
-# ChatBox_UniCA Frontend
-
-Vue 3 frontend providing a chat UI for the RAG API.
-
-## Quick Start
+Keep the backend running. In a second terminal:
 
 ```bash
 cd frontend
@@ -589,60 +179,110 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser. The dev server proxies `/api` requests to the backend at `http://127.0.0.1:8000`.
+Open <http://localhost:5173>. Vite proxies `/api` requests to
+`http://127.0.0.1:8000`. For a different backend address, set `VITE_API_BASE_URL`
+according to [frontend/README.md](frontend/README.md). The frontend never needs
+the Albert key. For production frontend assets, run `npm run build`.
 
-## Features
+## Model selection and configuration
 
-- **JSON / SSE toggle** — switch between standard JSON and streaming (SSE) responses.
-- **Parameter overrides** — adjust `top_k`, `rerank_alpha`, `weight_vec`, `weight_bm25`, and toggle query expansion from the UI.
-- **Session management** — create new sessions or clear session memory from the sidebar.
-- **Index management** — view index status and trigger a rebuild from the sidebar.
-- **Source citations** — each assistant message shows a collapsible list of retrieved source documents.
-- **Streaming indicators** — real-time stage display (retrieving / generating) with animated dots.
-- **Toast notifications** — success/error/info messages for all actions.
+The relevant defaults in `config.yaml` are:
 
-## Project Structure
+```yaml
+albert:
+  base_url: https://albert.api.etalab.gouv.fr/v1
+  api_key_env: ALBERT_API_KEY
+  api_key_file: api_albert.txt
+  timeout: 120
 
-```
-frontend/
-├── index.html
-├── package.json
-├── vite.config.js              # Dev proxy: /api → localhost:8000
-├── .env.example                # VITE_API_BASE_URL
-├── README.md
-└── src/
-    ├── main.js                 # Vue app entry
-    ├── App.vue                 # Root layout (sidebar + chat)
-    ├── api/
-    │   ├── client.js           # fetch wrapper + SSE stream parser
-    │   ├── chat.js             # POST /api/v1/chat/
-    │   ├── sessions.js         # POST/DELETE /api/v1/sessions/
-    │   └── index.js            # GET/POST /api/v1/index/
-    ├── composables/
-    │   ├── useChat.js          # Message list, streaming state, session lifecycle
-    │   └── useToast.js         # Toast notification management
-    ├── components/
-    │   ├── Sidebar.vue         # Left panel: status, sessions, index, model info
-    │   ├── ChatInterface.vue   # Main chat area: header, messages, input
-    │   ├── MessageBubble.vue   # Message bubble with Markdown, sources, streaming animation
-    │   ├── OverrideControls.vue# Collapsible overrides panel (sliders + checkbox)
-    │   ├── StatusCard.vue      # System status card (online/offline, doc count, session ID)
-    │   └── ToastContainer.vue  # Global toast notification container
-    └── styles/
-        ├── main.css            # Global styles, CSS variables, reset
-        └── chat.css            # Chat-specific layout and component styles
+retrieval:
+  rerank_provider: albert
+  albert_rerank_model_name: openweight-rerank
+
+query_expansion:
+  enabled: true
+  rewriter: albert
+  albert_model_name: openweight-medium
+
+generation:
+  provider: albert
+  albert_model_name: openweight-medium
+  temperature: 0.0
+  num_predict: 256
 ```
 
-## Scripts
+These are excerpts: edit the existing sections, preserving their other settings.
+`num_predict` becomes `max_completion_tokens` in Albert generation requests.
+`ALBERT_BASE_URL` overrides `albert.base_url`; a root URL or a URL ending in `/v1`
+is accepted. `timeout` is the per-request timeout in seconds.
 
-| Command | Description |
-| :--- | :--- |
-| `npm run dev` | Start dev server with hot reload |
-| `npm run build` | Build for production (output in `dist/`) |
-| `npm run preview` | Preview the production build |
+CLI arguments override the configuration for that run. For example, choose a
+different generation alias:
 
-## Environment Variables
+```bash
+python chat_box.py --albert-generation-model openweight-large -q "What are M1 prerequisites?"
+```
 
-| Variable | Default | Description |
-| :--- | :--- | :--- |
-| `VITE_API_BASE_URL` | (empty, uses Vite proxy) | Backend API base URL |
+Other model switches are `--albert-rerank-model` and `--albert-expansion-model`.
+Only choose models supporting the corresponding task and available to your account.
+
+To force Albert explicitly even with a different config file:
+
+```bash
+python chat_box.py --generation-provider albert --rerank-provider albert --expansion-rewriter albert -q "What are M1 prerequisites?"
+```
+
+You can mix providers. For example, use `--rerank-provider local` to load the local
+cross-encoder specified by `retrieval.rerank_model_name`. Switch generation and
+rewriting back with `--generation-provider ollama --expansion-rewriter ollama`;
+those stages use their `model_name` values and require a running Ollama server
+with those models installed. See [README_OLLAMA.md](README_OLLAMA.md).
+
+For the API, update `config.yaml` and restart the server after changing providers,
+model IDs, or credentials. Runtime parameter overrides do not rebuild model
+instances. Semantic answer caching is disabled by default; clear cached answers
+when changing models if you have enabled it. Existing experiment compatibility
+functions and RAGAS scripts retain their original model behavior and are not
+switched to Albert by this branch's runtime defaults.
+
+## Tests and troubleshooting
+
+Run the offline adapter tests without an API key or model downloads:
+
+```bash
+python -B -m unittest services.test_model_providers -v
+```
+
+The tests cover credential loading, HTTP request formatting, error handling,
+document/score alignment, multi-query score pooling, and provider selection.
+They mock Albert responses rather than making live inference requests.
+
+- **Missing key:** set `ALBERT_API_KEY` or create the private `api_albert.txt` file.
+- **HTTP 401/403:** check the key and account access.
+- **HTTP 404:** check the base URL and requested model ID.
+- **HTTP 429/503:** check quota or service availability and retry later.
+- **Timeout or invalid JSON:** check connectivity, the configured endpoint, and
+  any proxy that might return an HTML page instead of an API response.
+- **Missing Python module:** activate the intended environment and install
+  `requirements.txt` with that environment's `python -m pip`.
+- **Slow first start / `model.safetensors` download:** local embeddings require
+  Hugging Face weights even when inference uses Albert.
+- **Changed documents:** use `--force-rebuild` in the CLI or rebuild/select
+  documents through the API.
+
+## Relevant files
+
+| File | Role |
+| --- | --- |
+| `services/model_providers.py` | Albert HTTP client and provider factories |
+| `services/test_model_providers.py` | Offline adapter regression tests |
+| `chat_box.py` | CLI orchestration and provider/model arguments |
+| `api/dependencies.py` | Construct shared API models and retrieval components |
+| `api/main.py` | API lifecycle and conditional Ollama startup |
+| `api/routers/documents.py` | Keep query provider selection during document changes |
+| `config.yaml` | Albert-first branch defaults; no credentials |
+| `core/` | Existing indexing, retrieval, prompts, and memory implementations |
+| `frontend/` | Vue chat interface |
+
+Local keys, virtual environments, Python caches, downloaded weights, indexes,
+`frontend/node_modules`, and frontend build output are excluded from Git.

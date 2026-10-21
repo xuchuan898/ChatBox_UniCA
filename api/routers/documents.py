@@ -61,24 +61,11 @@ async def select_and_build(body: SelectDocsRequest) -> dict[str, Any]:
     retrieval_cfg = state.config.get("retrieval", {})
     qe_cfg = state.config.get("query_expansion", {})
 
-    from core.query_expander import QueryExpander, OllamaRewriter, PassthroughRewriter
+    from services.model_providers import build_query_expander
 
-    rewriter_type = qe_cfg.get("rewriter", "ollama")
-    if rewriter_type == "ollama":
-        rewriter = OllamaRewriter(model_name=qe_cfg.get("model_name", "qwen2.5:32b"))
-    else:
-        rewriter = PassthroughRewriter()
-
-    query_expander = QueryExpander(
-        rewriter=rewriter,
-        num_paraphrases=qe_cfg.get("num_paraphrases", 1),
-        add_translation=qe_cfg.get("add_translation", True),
-        source_lang=qe_cfg.get("source_lang", "auto"),
-        target_lang_for_translation=qe_cfg.get("target_lang_for_translation", "auto"),
-    )
+    query_expander = build_query_expander(state.config)
 
     from core.retriever import HybridRetriever
-    from core.reranker import CrossEncoderReranker
 
     state.retriever = HybridRetriever(
         vectordb=idx["vectordb"],

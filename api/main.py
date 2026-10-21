@@ -17,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api.dependencies import get_app_state
+from core.config_loader import load_config
+from services.model_providers import needs_ollama
 from api.exceptions import IndexNotReadyError, GenerationTimeoutError
 from api.routers import chat, config as config_router, debug, documents, index, sessions
 
@@ -116,8 +118,9 @@ def _ensure_model() -> None:
 async def lifespan(app: FastAPI):
     """Application lifespan management."""
     logger.info("Starting ChatBox_UniCA API server...")
-    _ensure_ollama()
-    _ensure_model()
+    if needs_ollama(load_config()):
+        _ensure_ollama()
+        _ensure_model()
     state = get_app_state()
     logger.info(
         "AppState initialized: retriever=%s, generator=%s, cache=%s",
